@@ -1,0 +1,101 @@
+# 显示层（backend）开发指南
+
+显示层是「把一帧画出来」的那一层。它的输入只有一个不可变对象
+[`Render`](../src/xiaocc/engine.py)，输出是屏幕上的像素。**它不读状态源、不判断业务、
+不决定角色长什么样** —— 这三条守住了，换平台就不用重写逻辑。
+
+## 1. 契约
+
+```python
+from xiaocc.backends.base import Backend
+
+class MyBackend(Backend):
+    name = "mybackend"        # xiaocc run --backend mybackend
+    interval = 0.25           # CLI 会覆盖成引擎节拍
+    self_paced = False        # True = 本层自己消化节拍（GUI 应当置 True）
+
+    def render(self, frame: Render) -> None: ...   # 必须实现（引擎只在状态变化时调用）
+    def linger(self, seconds: float) -> None: ...  # 可选：截图/肉眼验收时多留一会儿
+    def close(self) -> None: ...                   # 可选：收尾
+```
+
+`Render` 给出的东西（就这些，够画了）：
+
+| 字段 | 含义 |
+| --- | --- |
+| `frame.state` | 7 个状态之一（`idle/thinking/working/waiting/done/error/offline`） |
+| `frame.caption` | 状态卡主文案：`项目 · 详情 · 进度`（进度只在有真实数字时才出现） |
+| `frame.character` | 角色包：`canvas` / `palette` / `states[state].{motion, accent, caption}` |
+| `frame.event` | 原始状态事件（`source` / `detail` / `step` / `total`），调试才用 |
+
+## 2. 平台无关的部分直接复用 `window_layout`
+
+贴边、命中、动作曲线是**纯几何**，不依赖任何图形库，已经在
+[`backends/window_layout.py`](../src/xiaocc/backends/window_layout.py) 里实现并有单元测试：
+
+```python
+from xiaocc.backends import window_layout as wl
+
+body  = wl.body_rect_of_window(window_rect, canvas=character.canvas, scale=1.0)
+edge  = wl.choose_edge(body, screen)                 # 够近才吸附，太远返回 NONE
+strip = wl.collapsed_rect(edge, screen, body)         # 收起后的把手条
+full  = wl.docked_rect(edge, screen, size, center=strip.center.y)  # 展开后必须盖住把手条
+pose  = wl.pose_for(character.spec(state).motion, t)  # 动作在第 t 秒的姿态
+```
+
+`wl.Dock` 是收起/展开的状态机（`drop()` / `update()` / `drag_started()`），
+把「鼠标事件」翻译成 `DockAction.NONE|COLLAPSE|EXPAND` 就行。
+
+**坐标约定**：`window_layout` 用「屏幕左上角为原点、y 向下」（跟 Windows / Web / CGWindow 一致）。
+AppKit 用左下原点，所以在 AppKit 显示层里翻了两次：一次是窗口矩形（`:meth:`_Space.to_ns_rect`），
+一次是视图内矩形（`_local()`）。**别把屏幕坐标喂给视图绘制** —— 画到视图外面去了以后，
+屏幕上看只是「画面停住不动」，很难debug（本项目踩过，见第 4 节）。
+
+## 3. 造型从哪来：角色包优先，程序化骨架兜底
+
+显示层**不含**任何角色私有形状。取图的顺序（AppKit 显示层已实现，其它平台照抄即可）：
+
+1. `character.json` 的 `assets.base` / `assets.<state>` 指向的图片（PNG / SVG 都行）
+2. 角色包目录里自动发现的 `assets/<state>.png|.svg`
+3. 都没有 → 通用程序化骨架：只用 `palette` + `canvas` + `motion` 画「光环 + 球体 + 表情」
+
+第 3 条存在的意义是：第三方作者写了个新角色包、只填了配色，也能立刻看到东西，
+而不是一片空白。选定形象后，把它做成 per-state 图丢进角色包即可换脸，**显示层不用改**。
+
+## 4. 踩过的坑（照抄容易，独立踩出来要花一晚上）
+
+| 坑 | 现象 | 正确做法 |
+| --- | --- | --- |
+| 用窗口矩形判贴边 | 离边缘还有几十像素就自动收起 | 用**角色本体**矩形判（窗口带透明留白和文案带） |
+| 收起后立刻允许悬停展开 | 拖到边缘松手时鼠标还压在把手条上 → 一收一展疯狂抖动 | 收起时清掉「上膛」标志，鼠标**先离开一次**才允许展开（`Dock.armed`） |
+| 展开后的窗口没盖住把手条 | 展开瞬间鼠标就落到窗口外 → 立刻又收起 | 展开时用把手条的跨轴中心做锚点（有测试守这条不变量） |
+| 视图坐标 vs 屏幕坐标混用 | 画面「停住」，抓图拿到的是上一帧（字节完全一样） | 绘制只吃窗口内坐标；屏幕坐标只用于放窗口 |
+| 窗口缩放后视图尺寸没跟着变 | 收起/展开后内容错位 | 绘制时用视图实际高度换算 y，别用缓存的窗口矩形 |
+| 描边色没显式设置 | 弧线（笑眼/撇嘴）沿用上一笔的描边色，淡成一道灰边 | 每段弧之前显式 `setStroke()` |
+| GUI 显示层里再 `sleep` | 渲染 0.2 秒 + 睡 0.25 秒，动画一顿一顿 | 置 `self_paced = True`，用 `interval` 在自己的事件循环里等 |
+| 直接用真实鼠标做回归测试 | 测试会劫持用户的鼠标，且结果不确定 | 光标来源可注入（`AppKitBackend(cursor=...)`），拖拽用多段平滑位移 |
+
+## 5. 已经有的显示层
+
+| 名字 | 平台 | 依赖 | 能力 |
+| --- | --- | --- | --- |
+| `console` / `terminal` | 终端 | 无 | 调试、SSH、CI 里的端到端断言 |
+| `appkit` | macOS | `pyobjc-framework-Cocoa` | 透明无边框 + 置顶 + 贴边隐藏 + 点击穿透 + 拖拽 |
+
+想要 Windows / Web / TUI 版本？`xiaocc.sources` 和 `xiaocc.backends` 都是 entry point 扩展点，
+**不用改核心代码**（见 `pyproject.toml` 的 `[project.entry-points]`）：
+
+```toml
+[project.entry-points."xiaocc.backends"]
+mybackend = "my_pkg.backend:MyBackend"
+```
+
+## 6. 取证脚本
+
+`scripts/appkit_screenshots.py` 用注入的光标把「拖拽 → 贴边收起 → 悬停展开 → 鼠标离开再收起」
+跑一遍，逐步截图并断言窗口的真实状态（层级、透明、穿透、尺寸、视图是否跟窗口一致）：
+
+```bash
+python scripts/appkit_screenshots.py                    # → docs/evidence/
+python -m xiaocc.cli run --source hermes -b appkit --once --linger 4   # 真 CLI，窗口留 4 秒
+```

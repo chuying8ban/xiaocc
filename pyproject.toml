@@ -27,7 +27,8 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-macos = ["pyobjc-framework-Cocoa>=10.0"]
+# Quartz 只有取证脚本（scripts/appkit_screenshots.py）用，显示层本身只依赖 Cocoa
+macos = ["pyobjc-framework-Cocoa>=10.0", "pyobjc-framework-Quartz>=10.0"]
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
@@ -41,6 +42,7 @@ hermes = "xiaocc.sources.hermes:HermesSource"
 
 [project.entry-points."xiaocc.backends"]
 console = "xiaocc.backends.console:ConsoleBackend"
+appkit = "xiaocc.backends.appkit:AppKitBackend"
 
 [project.entry-points."xiaocc.characters"]
 default = "xiaocc.characters:builtin_character_dir"

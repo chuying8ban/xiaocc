@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.metadata as md
 import warnings
 from typing import Any, Callable
@@ -37,7 +38,15 @@ _BUILTIN_SOURCES: dict[str, Callable[..., StatusSource]] = {
 #: 显示层延迟导入：console 零依赖，AppKit 需要 pyobjc
 _BUILTIN_BACKENDS: dict[str, str] = {
     "console": "xiaocc.backends.console:ConsoleBackend",
+    "terminal": "xiaocc.backends.console:ConsoleBackend",  # 别名，喊得顺口
     "appkit": "xiaocc.backends.appkit:AppKitBackend",
+}
+
+#: 给 ``xiaocc backends`` 用的人话说明（内置显示层不容易从 docstring 里抠出一句）
+_BACKEND_NOTES: dict[str, str] = {
+    "console": "终端输出，用于调试、SSH 和 CI",
+    "terminal": "console 的别名（无头环境里喊 terminal 更顺口）",
+    "appkit": "macOS 原生窗口：透明无边框 + 置顶 + 贴边隐藏 + 点击穿透",
 }
 
 SOURCES = "xiaocc.sources"
@@ -69,11 +78,26 @@ def available_sources() -> dict[str, str]:
 
 
 def available_backends() -> dict[str, str]:
-    out: dict[str, str] = {"console": "终端输出，用于调试和 CI"}
+    out: dict[str, str] = {}
+    for name, target in _BUILTIN_BACKENDS.items():
+        out[name] = _backend_note(name, target)
     for name, ep in _entry_points(BACKENDS).items():
         if name not in out:
             out[name] = f"第三方显示层（{ep.value}）"
     return out
+
+
+def _backend_note(name: str, target: str) -> str:
+    """内置显示层的人话说明；依赖没装的也照列，但把原因写在后面。"""
+    note = _BACKEND_NOTES.get(name)
+    if note is None:
+        return f"内置显示层（{target}）"
+    if name == "appkit":
+        try:
+            importlib.import_module("objc")
+        except ImportError:
+            return note + "  ← 需要 pip install 'xiaocc[macos]'"
+    return note
 
 
 def load_source(name: str, **kwargs: Any) -> StatusSource:

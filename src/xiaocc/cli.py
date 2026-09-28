@@ -49,6 +49,13 @@ def _build_parser() -> argparse.ArgumentParser:
     run.add_argument("--backend", "-b", default="console", help="显示层，默认 console")
     run.add_argument("--character", "-c", default=None, help="角色包目录，默认内置")
     run.add_argument("--once", action="store_true", help="只跑一轮就退出")
+    run.add_argument(
+        "--linger",
+        type=float,
+        default=0.0,
+        metavar="秒",
+        help="渲染后让显示层再留 N 秒（截图 / 肉眼验收用；配合 --once 就是「打一枪看一眼」）",
+    )
 
     char = sub.add_parser("character", help="角色包操作")
     char_sub = char.add_subparsers(dest="char_command", required=True)
@@ -125,6 +132,8 @@ def _cmd_run(args: argparse.Namespace) -> int:
         backend = backend()
 
     engine = Engine(sources, character)
+    # GUI 显示层要用节拍跑自己的事件循环（见 Backend 文档）
+    backend.interval = engine.interval
     stopping = False
 
     def _stop(signum, _frame):  # noqa: ANN001 - signal 处理器签名固定
@@ -146,8 +155,11 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 backend.render(frame)
             if args.once:
                 break
-            time.sleep(engine.interval)
+            if not getattr(backend, "self_paced", False):
+                # GUI 显示层自己消化节拍（在自己的事件循环里等），再睡一次会让动画一顿一顿
+                time.sleep(engine.interval)
     finally:
+        backend.linger(args.linger)
         backend.close()
         engine.close()
     return 0

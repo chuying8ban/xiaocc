@@ -1,0 +1,399 @@
+{
+  "character": {
+    "id": "xiaocc",
+    "name": "小cc",
+    "canvas": [
+      220,
+      240
+    ]
+  },
+  "screen": [
+    1512.0,
+    982.0
+  ],
+  "started": "2026-09-28 23:16:36",
+  "checks": [
+    {
+      "check": "窗口不透明=false",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "窗口有阴影=false",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "置顶层级>0",
+      "ok": true,
+      "detail": "level=3"
+    },
+    {
+      "check": "窗口可见",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "待机时不挂文案",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "鼠标在透明角落 → 整窗穿透",
+      "ok": true,
+      "detail": "corner=Point(x=1237.0, y=97.0)"
+    },
+    {
+      "check": "鼠标在角色身上 → 接管点击",
+      "ok": true,
+      "detail": "body=Point(x=1360.0, y=230.0)"
+    },
+    {
+      "check": "松手判定落在右边缘",
+      "ok": true,
+      "detail": "right"
+    },
+    {
+      "check": "收起后是把手条厚度",
+      "ok": true,
+      "detail": "width=12.0"
+    },
+    {
+      "check": "收起后视图跟着窗口缩",
+      "ok": true,
+      "detail": "[12.0, 116.0]"
+    },
+    {
+      "check": "鼠标仍压在条上时保持收起（不抖动）",
+      "ok": true,
+      "detail": "collapsed"
+    },
+    {
+      "check": "悬停后变为展开",
+      "ok": true,
+      "detail": "expanded"
+    },
+    {
+      "check": "展开后仍贴右边缘",
+      "ok": true,
+      "detail": "right=1512.0"
+    },
+    {
+      "check": "展开后的窗口盖住把手条位置",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "鼠标离开后重新收起",
+      "ok": true,
+      "detail": "collapsed"
+    },
+    {
+      "check": "拖回屏幕中间 → 不再收起",
+      "ok": true,
+      "detail": "floating"
+    },
+    {
+      "check": "idle 用对了动作/配色",
+      "ok": true,
+      "detail": "state=idle art=(程序化骨架)"
+    },
+    {
+      "check": "working 用对了动作/配色",
+      "ok": true,
+      "detail": "state=working art=(程序化骨架)"
+    },
+    {
+      "check": "error 用对了动作/配色",
+      "ok": true,
+      "detail": "state=error art=(程序化骨架)"
+    },
+    {
+      "check": "done 用对了动作/配色",
+      "ok": true,
+      "detail": "state=done art=(程序化骨架)"
+    }
+  ],
+  "steps": [
+    {
+      "step": "01-idle-floating",
+      "note": "自由漂浮 + 待机动画",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/01-idle-floating.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          1236.0,
+          592.0,
+          248.0,
+          294.0
+        ],
+        "dock": "floating",
+        "edge": "none",
+        "art": "(程序化骨架)",
+        "caption_drawn": "",
+        "view_size": [
+          248.0,
+          294.0
+        ],
+        "state": "idle",
+        "caption": "xiaocc · 待命"
+      },
+      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/01-idle-floating.desktop.png"
+    },
+    {
+      "step": "02-docked-collapsed",
+      "note": "拖到右边缘松手 → 收成把手条",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/02-docked-collapsed.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          1500.0,
+          694.0,
+          12.0,
+          116.0
+        ],
+        "dock": "collapsed",
+        "edge": "right",
+        "art": "(程序化骨架)",
+        "caption_drawn": "",
+        "view_size": [
+          12.0,
+          116.0
+        ],
+        "state": "idle",
+        "caption": "xiaocc · 待命"
+      },
+      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/02-docked-collapsed.desktop.png"
+    },
+    {
+      "step": "03-handle-hover-no-flicker",
+      "note": "松手后鼠标仍在条上：不许自动弹开",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/03-handle-hover-no-flicker.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": false,
+        "ns_frame": [
+          1500.0,
+          694.0,
+          12.0,
+          116.0
+        ],
+        "dock": "collapsed",
+        "edge": "right",
+        "art": "(程序化骨架)",
+        "caption_drawn": "",
+        "view_size": [
+          12.0,
+          116.0
+        ],
+        "state": "idle",
+        "caption": "xiaocc · 待命"
+      }
+    },
+    {
+      "step": "04-hover-expanded",
+      "note": "鼠标移到把手条 → 展开（贴在右边缘）",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/04-hover-expanded.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          1264.0,
+          605.0,
+          248.0,
+          294.0
+        ],
+        "dock": "expanded",
+        "edge": "right",
+        "art": "(程序化骨架)",
+        "caption_drawn": "",
+        "view_size": [
+          248.0,
+          294.0
+        ],
+        "state": "idle",
+        "caption": "xiaocc · 待命"
+      },
+      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/04-hover-expanded.desktop.png"
+    },
+    {
+      "step": "05-leave-recalls",
+      "note": "鼠标离开 → 再次收起",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/05-leave-recalls.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          1500.0,
+          707.0,
+          12.0,
+          116.0
+        ],
+        "dock": "collapsed",
+        "edge": "right",
+        "art": "(程序化骨架)",
+        "caption_drawn": "",
+        "view_size": [
+          12.0,
+          116.0
+        ],
+        "state": "idle",
+        "caption": "xiaocc · 待命"
+      }
+    },
+    {
+      "step": "06-state-idle",
+      "note": "idle 动作 float",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/06-state-idle.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          635.0,
+          354.0,
+          248.0,
+          294.0
+        ],
+        "dock": "floating",
+        "edge": "none",
+        "art": "(程序化骨架)",
+        "caption_drawn": "",
+        "view_size": [
+          248.0,
+          294.0
+        ],
+        "state": "idle",
+        "caption": "xiaocc · 待命"
+      },
+      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/06-state-idle.desktop.png"
+    },
+    {
+      "step": "07-state-working",
+      "note": "working 动作 busy",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/07-state-working.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          635.0,
+          354.0,
+          248.0,
+          294.0
+        ],
+        "dock": "floating",
+        "edge": "none",
+        "art": "(程序化骨架)",
+        "caption_drawn": "xiaocc · 正在执行 read_file",
+        "view_size": [
+          248.0,
+          294.0
+        ],
+        "state": "working",
+        "caption": "xiaocc · 正在执行 read_file"
+      },
+      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/07-state-working.desktop.png"
+    },
+    {
+      "step": "08-state-error",
+      "note": "error 动作 wobble",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/08-state-error.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          635.0,
+          354.0,
+          248.0,
+          294.0
+        ],
+        "dock": "floating",
+        "edge": "none",
+        "art": "(程序化骨架)",
+        "caption_drawn": "xiaocc · 出错了：状态源超时",
+        "view_size": [
+          248.0,
+          294.0
+        ],
+        "state": "error",
+        "caption": "xiaocc · 出错了：状态源超时"
+      },
+      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/08-state-error.desktop.png"
+    },
+    {
+      "step": "09-state-done",
+      "note": "done 动作 cheer",
+      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/09-state-done.png",
+      "probe": {
+        "window_number": 6381,
+        "visible": true,
+        "level": 3,
+        "alpha": 1.0,
+        "opaque": false,
+        "has_shadow": false,
+        "ignores_mouse_events": true,
+        "ns_frame": [
+          635.0,
+          354.0,
+          248.0,
+          294.0
+        ],
+        "dock": "floating",
+        "edge": "none",
+        "art": "(程序化骨架)",
+        "caption_drawn": "xiaocc · 搞定",
+        "view_size": [
+          248.0,
+          294.0
+        ],
+        "state": "done",
+        "caption": "xiaocc · 搞定"
+      },
+      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/09-state-done.desktop.png"
+    }
+  ],
+  "passed": 20,
+  "failed": [],
+  "finished": "2026-09-28 23:16:42"
+}

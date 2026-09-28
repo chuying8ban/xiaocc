@@ -21,3 +21,7 @@ htmlcov/
 # 本地私有配置
 local/
 *.local.json
+
+# 连桌面一起截的取证图（能看见作者桌面上其它窗口的内容）——只留窗口本体图
+docs/evidence/*.desktop.png
+docs/evidence/1*-cli-real-run.png
