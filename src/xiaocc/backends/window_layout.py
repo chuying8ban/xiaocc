@@ -22,6 +22,9 @@ from dataclasses import dataclass
 from enum import Enum
 
 __all__ = [
+    "ANCHOR_CHOICES",
+    "ANCHOR_MARGIN",
+    "ANCHOR_TOP_OFFSET",
     "CAPTION_BAND",
     "EDGE_SNAP_DISTANCE",
     "HANDLE_LENGTH",
@@ -41,6 +44,7 @@ __all__ = [
     "collapsed_rect",
     "docked_rect",
     "inside_ellipse",
+    "parse_anchor",
     "parse_hex",
     "pose_for",
     "window_size_for",
@@ -418,6 +422,75 @@ FALLBACK_MOTION = "float"
 def pose_for(motion: str, seconds: float) -> Pose:
     """第 ``seconds`` 秒时动作 ``motion`` 的姿态。未知动作按待机处理。"""
     return MOTION_POSES.get(motion, MOTION_POSES[FALLBACK_MOTION])(seconds)
+
+
+# —— 初始停靠点 ——————————————————————————————————————————————————————————————
+
+#: 初始位置离屏幕边缘的留白。不能贴着边：贴边会被 :func:`choose_edge`
+#: 判成「用户想把它收进去」，角色一开机就只剩一条把手。
+ANCHOR_MARGIN = 28.0
+#: 顶部那排要躲开 macOS 菜单栏／刘海，所以比 :data:`ANCHOR_MARGIN` 多让这么多。
+ANCHOR_TOP_OFFSET = 96.0
+#: 合法的方位名。除此之外还接受 ``"x,y"`` 形式的屏幕绝对坐标（左上角）。
+ANCHOR_CHOICES = ("top-right", "top-left", "bottom-right", "bottom-left", "center")
+
+
+def _parse_xy(text: str) -> tuple[float, float] | None:
+    """``"120,300"`` → ``(120.0, 300.0)``；不是这个形状就返回 ``None``。"""
+    parts = text.split(",")
+    if len(parts) != 2:
+        return None
+    try:
+        return (float(parts[0].strip()), float(parts[1].strip()))
+    except ValueError:
+        return None
+
+
+def parse_anchor(
+    text: str | None,
+    screen: Rect,
+    size: tuple[float, float],
+    *,
+    margin: float = ANCHOR_MARGIN,
+    top_offset: float = ANCHOR_TOP_OFFSET,
+) -> Rect:
+    """配置里的「初始停靠点」→ 屏幕上的窗口矩形（返回值一定不越界）。
+
+    为什么要有这个：同一台机器上可能同时跑着别的桌宠（用户也可能自己开两个
+    不同角色），都默认出现在右上角就会叠成一坨、互相挡住。所以初始位置必须能
+    配置；而配置写错时要在**加载阶段**就报错、并把合法取值一次列全 ——
+    悄悄跑到屏幕外的话，用户看不见角色，只会以为程序挂了。
+
+    ``size`` 是窗口的 ``(宽, 高)``，一般由 :func:`window_size_for` 算出来。
+    ``text`` 为 ``None`` 或空串时按默认的 ``"top-right"``；方位名大小写与
+    首尾空白都不敏感。窗口比屏幕还大也不会抛异常（夹不进去就贴屏幕左上角）。
+    """
+    name = "top-right" if text is None else text.strip().lower()
+    if not name:
+        name = "top-right"
+
+    width, height = size
+    if name == "top-right":
+        x, y = screen.right - width - margin, screen.y + top_offset
+    elif name == "top-left":
+        x, y = screen.x + margin, screen.y + top_offset
+    elif name == "bottom-right":
+        x, y = screen.right - width - margin, screen.bottom - height - margin
+    elif name == "bottom-left":
+        x, y = screen.x + margin, screen.bottom - height - margin
+    elif name == "center":
+        x = screen.x + (screen.width - width) / 2.0
+        y = screen.y + (screen.height - height) / 2.0
+    else:
+        point = _parse_xy(name)
+        if point is None:
+            raise ValueError(
+                f"初始停靠点取值不合法：{text!r}；合法取值："
+                + "、".join(ANCHOR_CHOICES)
+                + '，或 "x,y" 形式的屏幕坐标（例如 "120,300"）'
+            )
+        x, y = point
+    return Rect(x, y, width, height).clamped_into(screen)
 
 
 # —— 颜色 ————————————————————————————————————————————————————————————————————

@@ -78,10 +78,6 @@ except ImportError as exc:  # pragma: no cover - 取决于环境
     raise ImportError("AppKit 显示层需要 PyObjC：pip install 'xiaocc[macos]'") from exc
 
 
-#: 窗口初始离屏幕右边缘的留白，以及距顶部多远（躲开菜单栏）。
-START_MARGIN_X = 28.0
-START_MARGIN_Y = 96.0
-
 #: 动画帧率上限。30fps 足够让动作连贯，又不会让笔记本风扇转起来。
 DEFAULT_FPS = 30.0
 
@@ -173,7 +169,10 @@ class _PetView(NSView):
 
 
 class AppKitBackend(Backend):
-    """macOS 原生窗口显示层。用法：``xiaocc run --backend appkit``。"""
+    """macOS 原生窗口显示层。用法：``xiaocc run --backend appkit``。
+
+    初始位置由 ``--backend-opt at=...`` 控制（默认右上角）。
+    """
 
     name = "appkit"
     #: 窗口动画要靠自己的事件循环跑，节拍由本层消化 —— 见 Backend 文档。
@@ -184,12 +183,19 @@ class AppKitBackend(Backend):
         *,
         fps: float = DEFAULT_FPS,
         scale: float | None = None,
+        at: str | None = None,
         snap_distance: float = wl.EDGE_SNAP_DISTANCE,
         cursor: Callable[[], wl.Point] | None = None,
     ) -> None:
         self.fps = max(1.0, min(60.0, float(fps)))
         self.snap_distance = snap_distance
         self._scale_override = scale
+        #: 初始停靠点（``--backend-opt at=...``）：方位名或 ``"x,y"``；``None`` = 默认右上角。
+        self._at = at
+        if at is not None:
+            # 取值写错就在**加载阶段**报错：真等到开窗口时才炸，用户看到的只是一个空桌面。
+            # 这里只为校验，真正的矩形要等屏幕尺寸和角色画布都已知（见 :meth:`_ensure_window`）。
+            wl.parse_anchor(at, wl.Rect(0.0, 0.0, 0.0, 0.0), (0.0, 0.0))
         #: 注入光标来源 —— 自动化截图/回归脚本用它模拟「鼠标在哪」，正常跑用真实鼠标。
         self._cursor_override = cursor
         self._window: Any = None
@@ -332,12 +338,7 @@ class AppKitBackend(Backend):
         app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)  # 不占 Dock、不抢焦点
         space = self._space()
         width, height = self._window_size()
-        start = wl.Rect(
-            space.screen.right - width - START_MARGIN_X,
-            space.screen.y + START_MARGIN_Y,
-            width,
-            height,
-        )
+        start = wl.parse_anchor(self._at, space.screen, (width, height))
         ns_rect = space.to_ns_rect(start)
 
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(

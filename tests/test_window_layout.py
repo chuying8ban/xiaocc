@@ -247,6 +247,73 @@ def test_sleep_breaths_slowly_and_cheer_hops_up():
     assert any(wl.pose_for("cheer", t / 20).dy < -4 for t in range(80))  # 向上跳 = dy 负
 
 
+# —— 初始停靠点 —————————————————————————————————————————————————————————————
+
+_W, _H = wl.window_size_for(CANVAS)
+_MARGIN = wl.ANCHOR_MARGIN
+_TOP = wl.ANCHOR_TOP_OFFSET
+
+
+def _anchor(text: str | None) -> wl.Rect:
+    return wl.parse_anchor(text, SCREEN, (_W, _H))
+
+
+@pytest.mark.parametrize(
+    "name,expected",
+    [
+        ("top-right", (SCREEN.right - _W - _MARGIN, SCREEN.y + _TOP)),
+        ("top-left", (SCREEN.x + _MARGIN, SCREEN.y + _TOP)),
+        ("bottom-right", (SCREEN.right - _W - _MARGIN, SCREEN.bottom - _H - _MARGIN)),
+        ("bottom-left", (SCREEN.x + _MARGIN, SCREEN.bottom - _H - _MARGIN)),
+        ("center", ((SCREEN.width - _W) / 2.0, (SCREEN.height - _H) / 2.0)),
+    ],
+)
+def test_parse_anchor_named_positions(name, expected):
+    """五个方位都按 margin / top_offset 手算得出，且落在屏幕内。"""
+    frame = _anchor(name)
+    assert (frame.x, frame.y) == pytest.approx(expected)
+    assert (frame.width, frame.height) == (_W, _H)
+    assert SCREEN.contains(frame.center)
+
+
+def test_parse_anchor_default_is_top_right():
+    """没配 = 配了默认值：None / 空串 / 大小写与首尾空白都归到 top-right。"""
+    assert _anchor(None) == _anchor("top-right")
+    assert _anchor("") == _anchor("top-right")
+    assert _anchor("  Top-Right  ") == _anchor("top-right")
+
+
+def test_parse_anchor_accepts_absolute_coordinates():
+    assert _anchor("120,300") == wl.Rect(120, 300, _W, _H)
+    assert _anchor("120, 300") == _anchor("120,300")
+
+
+def test_parse_anchor_clamps_coordinates_far_off_screen():
+    frame = _anchor("5000,5000")
+    assert frame.right == SCREEN.right  # 夹回屏幕内，右下角对齐
+    assert frame.bottom == SCREEN.bottom
+    assert SCREEN.contains(frame.center)
+
+
+@pytest.mark.parametrize("bad", ["middle", "120", "a,b"])
+def test_parse_anchor_rejects_garbage(bad):
+    with pytest.raises(ValueError) as excinfo:
+        _anchor(bad)
+    message = str(excinfo.value)
+    assert "top-right" in message
+    for name in wl.ANCHOR_CHOICES:  # 报错要把合法取值一次列全
+        assert name in message
+    assert "x,y" in message
+
+
+def test_parse_anchor_survives_window_bigger_than_screen():
+    huge = (SCREEN.width * 3.0, SCREEN.height * 3.0)
+    for text in (None, "center", "bottom-right", "5000,-20"):
+        frame = wl.parse_anchor(text, SCREEN, huge)  # 不抛异常
+        assert (frame.width, frame.height) == huge
+        assert frame.x == SCREEN.x and frame.y == SCREEN.y  # 夹不住 → 贴左上
+
+
 # —— 颜色 ————————————————————————————————————————————————————————————————
 
 

@@ -4,6 +4,7 @@
     xiaocc backends                   # 有哪些显示层可用
     xiaocc run --source hermes        # 跑起来（默认 console）
     xiaocc run --source 'file:~/.xiaocc/status.json' --backend appkit
+    xiaocc run -b appkit --backend-opt at=bottom-left   # 给显示层传选项
     xiaocc character validate ./my-character
     xiaocc where                      # 关键路径，排障先看这个
 
@@ -13,16 +14,20 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import logging
 import signal
 import sys
 import time
 from pathlib import Path
+from typing import Any
 
 from . import __version__, characters, registry
 from .engine import Engine
 
 __all__ = ["main"]
+
+log = logging.getLogger("xiaocc.cli")
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -47,6 +52,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="可以给多个；默认 hermes",
     )
     run.add_argument("--backend", "-b", default="console", help="显示层，默认 console")
+    run.add_argument(
+        "--backend-opt",
+        action="append",
+        default=[],
+        metavar="键=值",
+        help=(
+            "传给显示层构造函数的选项，可以重复给多个（值自动转 int/float/bool），"
+            "例如 --backend-opt at=bottom-left --backend-opt fps=30；"
+            "各显示层支持哪些选项见 docs/backends.md"
+        ),
+    )
     run.add_argument("--character", "-c", default=None, help="角色包目录，默认内置")
     run.add_argument("--once", action="store_true", help="只跑一轮就退出")
     run.add_argument(
@@ -105,12 +121,63 @@ def _cmd_character(path: str | None) -> int:
     return 0
 
 
+def _coerce_backend_opt(text: str) -> Any:
+    """``"30"`` → ``30``，``"0.8"`` → ``0.8``，``"true"/"false"`` → bool，其余原样当字符串。"""
+    for cast in (int, float):
+        try:
+            return cast(text)
+        except ValueError:
+            pass
+    lowered = text.lower()
+    if lowered == "true":
+        return True
+    if lowered == "false":
+        return False
+    return text
+
+
+def _parse_backend_opts(values: list[str]) -> dict[str, Any]:
+    """把重复给的 ``--backend-opt 键=值`` 收成一个 dict，直接透传给显示层构造函数。
+
+    这是**通用**机制：显示层想收什么选项，在自己的 ``__init__`` 里加个具名关键字参数就行，
+    CLI 不用跟着改。写错格式（没有 ``=``、或者键是空串）抛 :class:`ValueError`，
+    消息里带上正确写法 —— 命令行上的错要用人话说，不要甩栈。
+    """
+    opts: dict[str, Any] = {}
+    for value in values:
+        key, sep, raw = value.partition("=")
+        key = key.strip()
+        if not sep or not key:
+            raise ValueError(
+                f"显示层选项写错了：{value!r}；要写成 键=值，例如 --backend-opt at=bottom-left"
+            )
+        opts[key] = _coerce_backend_opt(raw.strip())
+    return opts
+
+
+def _unknown_backend_opts(name: str, opts: dict[str, Any]) -> list[str]:
+    """显示层拒收之后回头确认：到底是哪几个键它不认（只用来报错，不用来放行）。"""
+    try:
+        params = inspect.signature(registry.load_backend(name)).parameters
+    except (KeyError, ImportError, TypeError, ValueError):  # 问不出来就把选项全列上
+        return list(opts)
+    if any(param.kind is inspect.Parameter.VAR_KEYWORD for param in params.values()):
+        return list(opts)  # 收 **kwargs 的显示层：报错另有原因，别赖选项
+    return [key for key in opts if key not in params]
+
+
 def _cmd_run(args: argparse.Namespace) -> int:
     specs = args.source or ["hermes"]
     try:
         sources = [registry.parse_source_spec(spec) for spec in specs]
     except (KeyError, ValueError) as exc:
         print(f"状态源配置有问题：{exc}", file=sys.stderr)
+        return 2
+
+    try:
+        opts = _parse_backend_opts(args.backend_opt)
+    except ValueError as exc:
+        print(exc, file=sys.stderr)
         return 2
 
     try:
@@ -122,11 +189,22 @@ def _cmd_run(args: argparse.Namespace) -> int:
         print(f"警告：{warning}", file=sys.stderr)
 
     try:
-        backend = registry.load_backend(args.backend)
+        backend = registry.load_backend(args.backend, **opts)
     except (KeyError, ImportError) as exc:
         print(f"显示层加载失败：{exc}", file=sys.stderr)
         hint = "（appkit 显示层需要先装：pip install 'xiaocc[macos]'）"
         print(hint, file=sys.stderr)
+        return 2
+    except TypeError:
+        unknown = _unknown_backend_opts(args.backend, opts)
+        listed = " ".join(f"{key}={opts[key]}" for key in unknown) or "(见下)"
+        print(
+            f"显示层 {args.backend} 不认识选项 {listed}；该显示层支持哪些选项见 docs/backends.md",
+            file=sys.stderr,
+        )
+        return 2
+    except ValueError as exc:  # 选项的**取值**不合法（例如 at=middle），显示层在加载时就挡下来了
+        print(f"显示层 {args.backend} 选项有误：{exc}", file=sys.stderr)
         return 2
     if isinstance(backend, type):
         backend = backend()
@@ -136,7 +214,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     backend.interval = engine.interval
     stopping = False
 
-    def _stop(signum, _frame):  # noqa: ANN001 - signal 处理器签名固定
+    def _stop(signum, _frame):  # signal 处理器签名固定
         nonlocal stopping
         stopping = True
         print(f"\n收到信号 {signum}，准备退出…", file=sys.stderr)
@@ -147,7 +225,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         except ValueError:  # 非主线程，忽略
             pass
 
-    logging.info("小cc 启动：源=%s 角色=%s 节拍=%.2fs", specs, character.name, engine.interval)
+    log.info("小cc 启动：源=%s 角色=%s 节拍=%.2fs", specs, character.name, engine.interval)
     try:
         while not stopping:
             frame = engine.tick()

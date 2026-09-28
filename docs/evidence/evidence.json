@@ -11,7 +11,7 @@
     1512.0,
     982.0
   ],
-  "started": "2026-09-28 23:57:39",
+  "started": "2026-09-29 00:27:11",
   "checks": [
     {
       "check": "窗口不透明=false",
@@ -120,7 +120,7 @@
       "note": "自由漂浮 + 待机动画",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/01-idle-floating.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -151,7 +151,7 @@
       "note": "拖到右边缘松手 → 收成把手条",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/02-docked-collapsed.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -182,7 +182,7 @@
       "note": "松手后鼠标仍在条上：不许自动弹开",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/03-handle-hover-no-flicker.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -212,7 +212,7 @@
       "note": "鼠标移到把手条 → 展开（贴在右边缘）",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/04-hover-expanded.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -243,7 +243,7 @@
       "note": "鼠标离开 → 再次收起",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/05-leave-recalls.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -273,7 +273,7 @@
       "note": "idle 动作 float",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/06-state-idle.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -304,7 +304,7 @@
       "note": "working 动作 busy",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/07-state-working.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -335,7 +335,7 @@
       "note": "error 动作 wobble",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/08-state-error.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -366,7 +366,7 @@
       "note": "done 动作 cheer",
       "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/09-state-done.png",
       "probe": {
-        "window_number": 6949,
+        "window_number": 7210,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -395,5 +395,5 @@
   ],
   "passed": 20,
   "failed": [],
-  "finished": "2026-09-28 23:57:45"
+  "finished": "2026-09-29 00:27:16"
 }
