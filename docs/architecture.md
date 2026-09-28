@@ -86,6 +86,10 @@ src/xiaocc/
   sources/        base / hermes / file / command
   backends/       base / console（+ 平台显示层）
   characters/     内置角色包
-tests/            46 个用例，含用临时 sqlite 复刻 Hermes 表结构的源测试
-docs/design/      形象方向稿
+tests/            全部用例，含用临时 sqlite 复刻 Hermes 表结构的源测试
+docs/sources.md   状态源开发指南（三分钟接一个新状态源）
+docs/backends.md  显示层开发指南（契约、可复用的纯几何层、踩过的坑）
+docs/PRIOR-ART.md 命名可用性与「参考 / 雷同」边界
+docs/design/      形象稿与资产说明
+docs/evidence/    真窗口截图与断言明细
 ```

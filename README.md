@@ -1,6 +1,11 @@
 # 小cc
 
+[English](README_EN.md) | 中文
+
 > 住在桌面上的**状态伴侣**。谁都能驱动它，谁都能换掉它的皮，谁都能换掉它的窗口。
+
+小cc 是独立项目，与 DeepSeek、Hermes Agent、Google、小米以及任何其它桌宠项目均无关联；
+7 个状态词取自工作流的通用语义，不取自任何同类项目（边界与先例核查见 [docs/PRIOR-ART.md](docs/PRIOR-ART.md)）。
 
 小cc 是一个开源、可扩展的桌面宠物：它把「某个工作流正在干什么」变成一个看得见的
 小生命。默认接 Hermes，但状态源是插件——你的构建脚本、下载任务、番茄钟、CI，
@@ -39,14 +44,14 @@ xiaocc run --source hermes     # 读 Hermes 的真实 Agent 活动（默认终�
 xiaocc run --source 'file:~/.xiaocc/status.json'
 ```
 
-真实输出（本机，Hermes 正在干活时）：
+真实输出（本机实测，当时另一个会话正在执行工具）：
 
 ```
-( >  < ) 小cc [working]  xiaocc · 正在执行 pytest
-( ^  ^ ) 小cc [done]     xiaocc · 已完成 3/5 步
+( >  < ) 小cc [working]  xiaocc · 正在执行 read_file
+( >  < ) 小cc [working]  编译中 · 2/5
 ```
 
-任何脚本都能驱动它，不需要写一行 Python：
+第二条来自下面这条 `file:` 源 —— 任何脚本都能驱动它，不需要写一行 Python：
 
 ```bash
 echo '{"state":"working","detail":"编译中","step":2,"total":5}' > ~/.xiaocc/status.json
@@ -72,13 +77,17 @@ echo '{"state":"working","detail":"编译中","step":2,"total":5}' > ~/.xiaocc/s
 2. **不猜。** 过期（超过存活时间）就退档，不把「五分钟前的 working」当成还在干活。
 3. **不连坐。** 一个状态源抛异常只记日志（`xiaocc run -v` 可见），其它源照常上屏。
 
+想动手扩展：接一个新状态源看 [docs/sources.md](docs/sources.md)（三分钟，含可运行示例），
+写一个新显示层看 [docs/backends.md](docs/backends.md)。
+
 ## 路线图
 
 - [x] 协议 + 引擎 + 状态源（`hermes` / `file` / `command`）+ 角色包校验 + CI
-- [ ] macOS 原生显示层（透明、无边框、置顶、贴边隐藏）
-- [ ] 角色包定稿（待选定形象方向）
+- [x] macOS 原生显示层（透明、无边框、置顶、贴边隐藏、点击穿透）
+- [x] 角色包定稿：方向 B「胶囊机甲丸丸」7 状态矢量稿
 - [ ] Windows 原生显示层 / Web 显示层
 - [ ] `waiting` 状态的真实来源（工具审批、待确认消息）
+- [ ] `docs/` 的英文翻译
 - [ ] 单文件打包（不带 Python 也能跑）
 
 ## 许可
