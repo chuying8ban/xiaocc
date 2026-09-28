@@ -233,8 +233,15 @@ def _cmd_run(args: argparse.Namespace) -> int:
                 backend.render(frame)
             if args.once:
                 break
-            if not getattr(backend, "self_paced", False):
-                # GUI 显示层自己消化节拍（在自己的事件循环里等），再睡一次会让动画一顿一顿
+            # 这一轮的时间**必须**被走掉，哪怕 tick() 没吐出新帧：引擎只在状态变化时给帧，
+            # 而状态大部分时间是不变的。少一边走时间，主循环就成了没有节拍的空转 ——
+            # 实测 appkit 显示层 5 秒跑了 732768 圈（其中 732767 圈 tick() 返回 None，
+            # 既不 render 也不睡），CPU 99.8%、一个核吃满；同样的循环下 console 是 0%。
+            # 所以两条路都得走：self_paced 的显示层（GUI）自己拥有事件循环，由 idle() 去
+            # 消化节拍（再补一次 sleep 会让动画一顿一顿）；其余显示层由这里 sleep。
+            if backend.self_paced:
+                backend.idle()
+            else:
                 time.sleep(engine.interval)
     finally:
         backend.linger(args.linger)

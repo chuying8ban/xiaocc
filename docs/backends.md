@@ -99,6 +99,9 @@ xiaocc run -b appkit --backend-opt at=bottom-left --backend-opt scale=0.8 --back
 | 窗口缩放后视图尺寸没跟着变 | 收起/展开后内容错位 | 绘制时用视图实际高度换算 y，别用缓存的窗口矩形 |
 | 描边色没显式设置 | 弧线（笑眼/撇嘴）沿用上一笔的描边色，淡成一道灰边 | 每段弧之前显式 `setStroke()` |
 | GUI 显示层里再 `sleep` | 渲染 0.2 秒 + 睡 0.25 秒，动画一顿一顿 | 置 `self_paced = True`，用 `interval` 在自己的事件循环里等 |
+| `self_paced = True` 却只在 `render()` 里走时间 | **一个核吃满**（实测 99.9%）：`engine.tick()` 只在状态变化时给帧，**绝大多数轮次返回 `None`**，那几轮既不 `render()` 也不睡眠 → 主循环空转（实测 5 秒 732768 圈 / 99.8%）。降 `fps` 完全无效，因为瓶颈不在每帧工作量上 | `self_paced` 的显示层必须实现 `idle()`，把「没有新帧」那一拍的时间也走掉（见 `Backend.idle`）；`idle()` 里**绝不能**直接返回 |
+| 用 `nextEventMatchingMask` 当限速器 | 以为它会按 `untilDate` 阻塞 33 毫秒，实际立刻返回 `None` | 它在本进程（没有 `NSApp.run()`）**不阻塞**：帧预算的余量用显式 `time.sleep()` 睡掉 |
+| 拿 `ps %cpu` 单次采样验收 | 分不清「启动那几秒烧的」和「一直在烧」 | 采两次 `ps -o time=` 算差值（或 `resource.getrusage` 前后做差）得到窗口内真实占用 |
 | 直接用真实鼠标做回归测试 | 测试会劫持用户的鼠标，且结果不确定 | 光标来源可注入（`AppKitBackend(cursor=...)`），拖拽用多段平滑位移 |
 
 ## 6. 已经有的显示层

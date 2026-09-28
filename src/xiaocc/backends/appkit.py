@@ -24,7 +24,7 @@ import logging
 import math
 import time
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
@@ -81,7 +81,34 @@ except ImportError as exc:  # pragma: no cover - 取决于环境
 #: 动画帧率上限。30fps 足够让动作连贯，又不会让笔记本风扇转起来。
 DEFAULT_FPS = 30.0
 
+#: 收起时把手的呼吸周期（秒）。指纹按这个周期量化相位 —— 呼吸动画一帧都不能少。
+_HANDLE_PULSE_PERIOD = 1.6
+
+#: 动画量的量化精度（小数位）。3 位足够把相邻两帧的动作分开，又吃得掉无意义的抖动。
+_POSE_PRECISION = 3
+
+#: 一圈最多消费多少个**就绪**事件：拖拽时鼠标事件成串到达，一次只取一个会跟不上手；
+#: 给个上限是防止极端事件洪水把这一帧拖长。
+_MAX_EVENTS_PER_LOOP = 64
+
 _IMAGE_SUFFIXES = (".png", ".svg", ".pdf", ".tiff", ".jpg", ".jpeg")
+
+
+def _quantize_pose(pose: Any) -> tuple[Any, ...]:
+    """把姿势量化成可比对的元组：浮点四舍五入到 ``_POSE_PRECISION`` 位，其余字段原样。
+
+    量化的目的是「同一个动作别算成两个」，而 33ms 一帧的位移仍会落到不同格子里 ——
+    所以浮动能照常播，不会被整帧跳过。
+    """
+    if is_dataclass(pose):
+        values: tuple[Any, ...] = tuple(getattr(pose, field.name) for field in fields(pose))
+    elif hasattr(pose, "__dict__"):  # 防御：布局层哪天换成普通类
+        values = tuple(getattr(pose, name) for name in sorted(vars(pose)))
+    else:
+        values = (pose,)
+    return tuple(
+        round(value, _POSE_PRECISION) if isinstance(value, float) else value for value in values
+    )
 
 
 @dataclass(frozen=True)
@@ -213,18 +240,60 @@ class AppKitBackend(Backend):
         self._last_art: str = "(程序化骨架)"
         self._last_paint_state: str | None = None
         self._last_caption_drawn: str = ""
+        #: 上一次**真正画下去**那一帧的指纹；一致就跳过重绘（见 :meth:`_fingerprint`）
+        self._last_fingerprint: tuple[Any, ...] | None = None
+        #: 光标当前是否落在热区 —— 由 :meth:`_poll` 维护，指纹要用
+        self._cursor_hot = False
+        #: 事件循环的自证据：本秒累计圈数 / 上一秒结算出的圈速 / 上一圈真正睡了多久
+        self._pump_loops = 0
+        self._pump_loops_per_sec = 0.0
+        self._pump_window_start = time.monotonic()
+        self._pump_sleep_ms = 0.0
+        #: 当前这一拍的起点时刻 —— :meth:`idle` 用它算「还差多久到下一拍」。
+        #: 在 __init__ 里就初始化，免得第一轮还没有 render 过就读不到属性。
+        self._last_tick = time.monotonic()
 
     # —— 生命周期 ——————————————————————————————————————————————————————————
 
     def render(self, frame: Render) -> None:
+        """呈现新帧，并在本层的事件循环里把这一拍（``interval``）走掉。
+
+        「谁负责走时间」的约定：本层 ``self_paced = True`` ⇒ 节拍归本层，``cli.py``
+        不会再替我们补 ``time.sleep()``。所以有新帧的这一轮由这里走：``_pump(interval)``
+        边跑事件循环边等，动画才连续；没有新帧的那一轮由 :meth:`idle` 补上剩余时间
+        （见那里的说明，两边加起来必须**每轮都恰好走掉一拍**）。
+        """
         self._ensure_window(frame.character)
         if frame.state is not self._last_paint_state:
             self._last_paint_state = frame.state
             # 状态一变，动作从这一秒重新开始 —— 否则切到「搞定」会从半截开始跳
             self._started = time.monotonic()
         self._frame = frame
-        self._paint()
+        self._paint(force=True)  # 引擎推来的新帧一定画一次；之后的节拍由 _pump 按指纹决定
+        beat_start = time.monotonic()
         self._pump(self.interval)  # 用这段节拍跑自己的事件循环 → 动画连续
+        # 记「这一拍的起点」而不是终点：这一拍已经在上面的 _pump 里走完了，同一轮里
+        # 紧跟其后的 idle() 算出 gap ≈ 0，就不会再多跑一段（否则有帧的那轮要花两拍）。
+        self._last_tick = beat_start
+
+    def idle(self) -> None:
+        """本轮没有新帧：把「到下一个节拍」的剩余时间在自己的事件循环里走掉。
+
+        约定同上：``self_paced = True`` ⇒ 节拍归本层，``render()`` 走掉一个
+        ``interval``、本方法补上这一拍剩下的 ``gap``（``self.interval`` 是 CLI 注入的
+        节拍，默认 0.25，实跑 1.0）。引擎只在状态变化时给帧，所以主循环里**绝大多数**
+        轮次都走到这里 —— 也就是说这里**绝不能立刻返回**：立刻返回等于整个主循环没有任何
+        限速，实测 5 秒空转 **732768 圈**（其中 732767 圈 ``tick()`` 返回 ``None``，
+        既不 render 也不睡）、CPU **99.8%**，一个核吃满；把这一拍走掉之后同样的循环只有
+        个位数百分比。注意 ``_pump()`` 内部还有一层帧预算限速（``budget`` + ``time.sleep``），
+        那层管「一圈之内别空转」，这层管「没有新帧时也得有人把时间走掉」，两者都要。
+        """
+        gap = self.interval - (time.monotonic() - self._last_tick)
+        if gap > 0.0:
+            self._pump(gap)
+        # 这一拍到这儿算走完，下一拍从现在开始计时（gap ≤ 0 时也要重置，
+        # 否则 _last_tick 会越来越旧、算出的 gap 恒为负，又退回空转）。
+        self._last_tick = time.monotonic()
 
     def linger(self, seconds: float) -> None:
         """保持窗口 N 秒（截图 / 肉眼验收）。期间动画照跑。"""
@@ -241,6 +310,7 @@ class AppKitBackend(Backend):
         self._window = None
         self._view = None
         self._frame = None
+        self._last_fingerprint = None
 
     # —— 供脚本/自动化调用（和鼠标走同一套代码路径）—————————————————————————
 
@@ -301,6 +371,13 @@ class AppKitBackend(Backend):
             ]
             if self._view is not None
             else None,
+            #: —— 事件循环的实测节拍：运维从进程外核对「还烧不烧核」就看这两个数 ——
+            #: 上一秒真正跑了多少圈（用上一秒的完整计数，不是瞬时值）。应当 ≈ fps；
+            #: 远高于 fps 就说明又退回忙等了。
+            "pump_loops_per_sec": self._pump_loops_per_sec,
+            #: 上一圈真正睡掉的毫秒数：≈ 1000/fps − 这一圈的开销。
+            #: 长期接近 0 说明没在让出 CPU（或一帧画得太久）。
+            "pump_sleep_ms": self._pump_sleep_ms,
         }
         if self._frame is not None:
             info["state"] = self._frame.state.value
@@ -370,6 +447,7 @@ class AppKitBackend(Backend):
         self._window, self._view = panel, view
         self._window_local = start
         self._started = time.monotonic()
+        self._last_fingerprint = None  # 新窗口 = 画面从零开始，第一帧必须真画
         log.info("AppKit 窗口就绪：%sx%s @ %s", width, height, start)
 
     def _set_window_rect(self, rect: wl.Rect) -> None:
@@ -380,30 +458,101 @@ class AppKitBackend(Backend):
     # —— 每个动画节拍：命中判定 + 收起/展开 ————————————————————————————————
 
     def _pump(self, seconds: float) -> None:
-        """在自己的事件循环里待 ``seconds`` 秒：处理输入事件、推进动画、判定贴边。"""
+        """在自己的事件循环里待 ``seconds`` 秒：处理输入事件、推进动画、判定贴边。
+
+        限速**只能**靠下面那句显式的 ``time.sleep()``，别指望 ``untilDate`` 帮你阻塞：
+        本进程是没调用过 ``NSApp.run()`` 的 accessory 应用，
+        ``nextEventMatchingMask_untilDate_inMode_dequeue_`` 在这种进程里**不按 untilDate 等待** ——
+        队列里没有就绪事件就立刻返回 ``None``。那样 while 会以 CPU 极限速度空转，每圈还白跑一遍
+        ``_poll()``（多次 ObjC 调用）+ ``displayIfNeeded()``（同步整窗重绘）：实测常驻吃满一个核
+        （``%cpu`` 98~99%），而且把 fps 从 30 调到 10 毫无变化 —— 因为 fps 只改传给 untilDate 的
+        间隔，压根不是限速器。所以每圈画完，把 ``1/fps`` 帧预算里没用完的余量睡掉：每秒圈数被
+        硬性限在 fps 以内，CPU 占用只跟「画了多少」挂钩，不跟「CPU 有多快」挂钩。**别退回忙等。**
+        """
         app = NSApplication.sharedApplication()
-        step = 1.0 / self.fps
+        budget = 1.0 / self.fps
         deadline = time.monotonic() + max(0.0, seconds)
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 break
-            event = app.nextEventMatchingMask_untilDate_inMode_dequeue_(
-                NSEventMaskAny,
-                NSDate.dateWithTimeIntervalSinceNow_(min(step, remaining)),
-                NSDefaultRunLoopMode,
-                True,
-            )
-            if event is not None:
+            frame_start = time.monotonic()
+            # 事件只取**已经就绪**的：untilDate 传当前时刻 = 立即返回，不指望它阻塞。
+            # 一圈里把就绪事件取干净，是因为拖拽时鼠标事件成串到达，一次只取一个会跟不上手。
+            for _ in range(_MAX_EVENTS_PER_LOOP):
+                event = app.nextEventMatchingMask_untilDate_inMode_dequeue_(
+                    NSEventMaskAny,
+                    NSDate.date(),
+                    NSDefaultRunLoopMode,
+                    True,
+                )
+                if event is None:
+                    break
                 app.sendEvent_(event)
-            self._poll()
-            self._paint()
+            changed = self._poll()
+            self._paint(force=changed)
+            self._count_loop()
+            # 帧预算的余量睡掉（不超过本次 _pump 的截止时间）—— 这一句就是限速器
+            nap = min(budget - (time.monotonic() - frame_start), deadline - time.monotonic())
+            slept = 0.0
+            if nap > 0.0:
+                before = time.monotonic()
+                time.sleep(nap)
+                slept = time.monotonic() - before
+            self._pump_sleep_ms = round(slept * 1000.0, 1)
 
-    def _paint(self) -> None:
-        if self._view is None:
+    def _count_loop(self) -> None:
+        """累计事件循环的圈数，满一秒结算一次 —— 对外报的是上一秒的完整计数，不是瞬时值。"""
+        self._pump_loops += 1
+        now = time.monotonic()
+        elapsed = now - self._pump_window_start
+        if elapsed >= 1.0:
+            self._pump_loops_per_sec = round(self._pump_loops / elapsed, 1)
+            self._pump_loops = 0
+            self._pump_window_start = now
+
+    def _paint(self, force: bool = False) -> None:
+        """重画一帧。``displayIfNeeded()`` 是同步整窗重绘，画面没变就别白画。"""
+        if self._view is None or self._window is None:
             return
+        fingerprint = self._fingerprint()
+        # 拖拽中每帧都得画：窗口正跟手移动，指纹一样也不能停
+        if not force and not self._dragging and fingerprint == self._last_fingerprint:
+            return
+        self._last_fingerprint = fingerprint
         self._view.setNeedsDisplay_(True)
         self._window.displayIfNeeded()
+
+    def _fingerprint(self) -> tuple[Any, ...] | None:
+        """「这一帧真要画什么」的指纹：指纹一致 = 画面一致 = 可以跳过重绘。
+
+        覆盖所有会改变像素的输入 —— 状态、文案、贴边状态、是否显示把手、光标是否在热区、
+        窗口几何，以及动画量（展开时是姿势，收起时是把手呼吸的相位；浮点一律四舍五入到
+        ``_POSE_PRECISION`` 位再比，既吃得掉无意义的抖动，又不会把动画帧整帧跳过去）。
+        """
+        frame = self._frame
+        character = self._character
+        if frame is None or character is None:
+            return None
+        rect = self._window_local
+        seconds = time.monotonic() - self._started
+        handle = self._handle_shown
+        animation: Any
+        if handle:
+            # 收起时画的是把手脉冲：按周期量化相位，呼吸照常一帧不落
+            animation = round(seconds % _HANDLE_PULSE_PERIOD, _POSE_PRECISION)
+        else:
+            animation = _quantize_pose(wl.pose_for(character.spec(frame.state).motion, seconds))
+        return (
+            frame.state,
+            frame.caption,
+            self._dock.state,
+            self._dock.edge,
+            handle,
+            self._cursor_hot,
+            (round(rect.x, 1), round(rect.y, 1), round(rect.width, 1), round(rect.height, 1)),
+            animation,
+        )
 
     def _cursor(self) -> wl.Point:
         if self._cursor_override is not None:
@@ -440,11 +589,14 @@ class AppKitBackend(Backend):
             wl.docked_rect(edge, self._space().screen, self._window_size(), center=center)
         )
 
-    def _poll(self) -> None:
+    def _poll(self) -> bool:
+        """命中判定 + 收起/展开。返回**这一圈是否有变化**（变了就得强制重画一帧）。"""
         if self._window is None or self._dragging:
-            return
+            return False
         cursor = self._cursor()
         hot = self._is_hot(cursor)
+        changed = hot != self._cursor_hot
+        self._cursor_hot = hot
         if bool(self._window.ignoresMouseEvents()) == hot:  # 只在需要时戳 ObjC
             self._window.setIgnoresMouseEvents_(not hot)
         action = self._dock.update(cursor, self._window_local)
@@ -453,9 +605,12 @@ class AppKitBackend(Backend):
             body = self._body_in_screen()
             self._set_window_rect(wl.collapsed_rect(self._dock.edge, self._space().screen, body))
             log.debug("贴边收起：%s", self._dock.edge)
+            changed = True
         elif action is wl.DockAction.EXPAND:
             self._expand_from_edge()
             log.debug("贴边展开：%s", self._dock.edge)
+            changed = True
+        return changed
 
     # —— 鼠标：拖拽就位 / 松手贴边 ——————————————————————————————————————————
 
@@ -683,7 +838,7 @@ class AppKitBackend(Backend):
         """收起状态：贴边的一条发光把手，提示「鼠标移过来」。"""
         # 窗口内坐标（不是屏幕坐标！）—— 收起时窗口本身就是那条把手
         rect = self._local(wl.Rect(0.0, 0.0, *self._window_local.size))
-        pulse = 0.55 + 0.25 * (1.0 + math.sin(2 * math.pi * t / 1.6)) / 2.0
+        pulse = 0.55 + 0.25 * (1.0 + math.sin(2 * math.pi * t / _HANDLE_PULSE_PERIOD)) / 2.0
         radius = min(rect.size.width, rect.size.height) / 2.0
         bar = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(rect, radius, radius)
         self._color(accent, pulse).setFill()
