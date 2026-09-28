@@ -1,5 +1,7 @@
 # 状态源（source）开发指南：三分钟接一个新状态源
 
+[English](sources_EN.md) | 中文
+
 状态源是整个项目里唯一回答「现在在干什么」的地方。写一个类 + 声明一行 entry point，
 `xiaocc sources` 里就会多一项，**核心代码一行不用改**。
 
@@ -29,13 +31,18 @@ xiaocc run --source 'file:~/.xiaocc/status.json' -b terminal --once
 ```
 
 ```bash
-# 2) 命令的 stdout 就是状态；退出码非 0 记成 error
+# 2) 命令的 stdout 就是状态
 xiaocc run --source 'command:mytool status --json' -b terminal --once
 ```
 
 `file:` 的语义是「文件内容 = 当前状态」：文件没被改过不代表状态过期，要收工就让脚本写
 `{"state":"idle"}`；文件被删掉则是 `offline`，不是崩溃。`command:` 的 stdout 为空表示
 「这轮无话可说」，不是错误。
+
+**源自己坏掉不算状态。** 文件读不了、命令不存在或超时、退出码非 0、stdout 不是合法 JSON，
+这些都算**机械故障**：原因只进日志（`xiaocc -v`）和 `Engine.health()`，不拿它去改桌宠的表情 ——
+一条坏源没资格盖住别的好源。屏幕上也没有任何别的源说话时，才以 `offline` 呈现、把原因写进
+`detail`。`error` 这个状态只留给「工作流自己报错」，也就是源汇报的 payload 里写着 `state=error`。
 
 ---
 
@@ -134,11 +141,16 @@ def __init__(self, spec: str = "25") -> None:      # --source 'pomodoro:25,bg'
 | TTL 和优先级不归你管 | 由 `protocol.STATE_TTL` / `STATE_PRIORITY` 决定（`working` 45s、`error`/`thinking` 90s、`idle`/`offline` 不过期） |
 | `interval` 决定节拍 | 引擎取**所有源里最小的**，下限 0.25s；`file` 0.75s、`command` 2s |
 | 抛异常会被隔离 | 引擎记日志（`xiaocc -v`）+ `Engine.health()`，其它源照常上屏 |
+| 机械故障不进画面 | 文件读不了 / 命令不存在、超时、退出码非 0 / stdout 不是合法 JSON → 只进日志与 `health()`；屏幕上没有别的源说话时才以 `offline` 呈现，原因在 `detail` |
 | `close()` 可选 | 退出时收尾（关连接、落盘），基类默认什么都不做 |
 
-**「抛异常」和「返回 ERROR 事件」不是一回事**：抛异常 = 这个源瞎了，别人替你上屏；返回
-`ERROR` 事件 = 你确实报了一个错误，而 `error` 优先级最高，它会盖住其它所有源。后者要慎用，
-只有「必须让人看见」才这么报。
+**三件事别混**：
+
+- **抛异常** = 这个源瞎了。引擎隔离它，别人替你上屏。
+- **机械故障**（文件读不了、命令不存在/超时/退出码非 0、输出不是 JSON）= 同样不进画面，原因
+  进日志与 `health()`；没有别的源说话时才以 `offline` 呈现。
+- **`ERROR` 事件** = 工作流自己出错了，也就是你在 payload 里报 `state=error`。`error` 优先级
+  最高、会盖住其它所有源，所以只有当「必须让人看见」时才这么报。
 
 ---
 
@@ -163,9 +175,9 @@ xiaocc run --source my_src -b terminal --once   # 只跑一帧，适合脚本和
 | entry point 组名写错（`xiaocc.source`、`xiaocc_sources`） | 装上了、`xiaocc sources` 里却没有，也不报错 | 照抄 `xiaocc.sources`；装完先跑 `xiaocc sources` 确认 |
 | `poll()` 里干重活（网络请求、扫目录） | 节拍被这一个源拖慢，整只桌宠卡住 | `poll()` 只读「早就准备好的值」，重活放后台线程，或干脆用 `file:` + 定时脚本 |
 | 用了数据里的旧时间戳做 `at` | TTL 误判成过期，状态刚报就退档 | 用当前时间构造事件（`FileSource` 就为此显式把 `at` 换成 `time.time()`） |
-| 在 shell 里写 `command:` 的 JSON | 双引号被 shell 吃掉 → `stdout 不是合法状态 JSON` | 把输出逻辑写成脚本文件，别在命令行里跟引号搏斗 |
-| 坏源每轮刷一条 ERROR | 日志/画面被刷屏 | 同一个故障只报一次（内置源都这么做），详见 `CommandSource._error` |
-| 一个永远坏掉的源挂在命令行上 | 它以最高优先级抢镜，好源也看不见 | 不在乎的源就别挂；或者让它返回 `None` |
+| 在 shell 里写 `command:` 的 JSON | 双引号被 shell 吃掉 → 输出不是合法 JSON，算机械故障，只在 `xiaocc -v` 的日志里看得到 | 把输出逻辑写成脚本文件，别在命令行里跟引号搏斗 |
+| 坏源每轮刷日志 | 日志被刷屏 | 同一个故障只写一次（`CommandSource`、`FileSource` 都这么做） |
+| 一个永远坏掉的源挂在命令行上 | 它的机械故障只在日志里，画面不受影响 | 想让人看见就在 payload 里报 `state=error`（这是唯一的抢镜方式） |
 | `--source 名字` 报「要写成 '名字:参数'」 | 你的构造函数参数没有默认值 | 给参数加默认值，或者老实写 `名字:参数` |
 | 在 `poll()` 里改共享状态 | 多源合并时行为诡异 | `StatusEvent` 是 frozen 的，源之间不要互相写对方的数据 |
 

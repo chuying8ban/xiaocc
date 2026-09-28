@@ -88,6 +88,7 @@ src/xiaocc/
   characters/     内置角色包
 tests/            全部用例，含用临时 sqlite 复刻 Hermes 表结构的源测试
 docs/sources.md   状态源开发指南（三分钟接一个新状态源）
+docs/sources_EN.md  同上，英文版
 docs/backends.md  显示层开发指南（契约、可复用的纯几何层、踩过的坑）
 docs/PRIOR-ART.md 命名可用性与「参考 / 雷同」边界
 docs/design/      形象稿与资产说明

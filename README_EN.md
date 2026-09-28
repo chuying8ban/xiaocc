@@ -141,7 +141,7 @@ point group does not raise an error, so run `xiaocc sources` after installing to
 was found.
 
 The long form, including the eight mistakes people hit while writing one, is
-[docs/sources.md](docs/sources.md) (Chinese).
+[docs/sources_EN.md](docs/sources_EN.md) (the Chinese original is [docs/sources.md](docs/sources.md)).
 
 ## Characters are data
 
@@ -197,15 +197,18 @@ captures returned the previous frame and four screenshots had identical bytes. T
 inherited a stroke colour from the shell and faded to grey. The idle face was frowning. None of the
 three is visible in a careful read of the source.
 
-`docs/` is in Chinese for now: [architecture](docs/architecture.md), [sources](docs/sources.md),
-[backends](docs/backends.md), [prior art](docs/PRIOR-ART.md), [evidence](docs/evidence/README.md).
+`docs/` is mostly Chinese for now, with English where it matters most:
+[sources (EN)](docs/sources_EN.md), [sources (中文)](docs/sources.md),
+[architecture](docs/architecture.md), [backends](docs/backends.md), [prior art](docs/PRIOR-ART.md),
+[evidence](docs/evidence/README.md).
 
 ## Roadmap
 
 - [x] protocol, engine, sources (`hermes`, `file`, `command`), character loading, macOS window, CI
 - [ ] Windows and web backends
 - [ ] a real `waiting` source (tool approval, pending review)
-- [ ] English translations of `docs/`
+- [x] English guide for state sources ([docs/sources_EN.md](docs/sources_EN.md))
+- [ ] English translations for the rest of `docs/`
 - [ ] single-file build, so it runs without a Python install
 
 ## Provenance and boundaries

@@ -77,8 +77,8 @@ echo '{"state":"working","detail":"编译中","step":2,"total":5}' > ~/.xiaocc/s
 2. **不猜。** 过期（超过存活时间）就退档，不把「五分钟前的 working」当成还在干活。
 3. **不连坐。** 一个状态源抛异常只记日志（`xiaocc run -v` 可见），其它源照常上屏。
 
-想动手扩展：接一个新状态源看 [docs/sources.md](docs/sources.md)（三分钟，含可运行示例），
-写一个新显示层看 [docs/backends.md](docs/backends.md)。
+想动手扩展：接一个新状态源看 [docs/sources.md](docs/sources.md)（三分钟，含可运行示例；
+英文版 [docs/sources_EN.md](docs/sources_EN.md)），写一个新显示层看 [docs/backends.md](docs/backends.md)。
 
 ## 路线图
 
