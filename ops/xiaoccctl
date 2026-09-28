@@ -1,0 +1,329 @@
+#!/bin/zsh
+# 小cc 桌面面板 —— 本机运维入口（启 / 停 / 查 / 自检）
+#
+# 这是哪台机器上的什么：用户 Mac（1512x982），替代旧桌宠「小汐」
+# （launchd label = ai.hermes.mascot-pet，已 bootout + plist 改名 .disabled，目录 ../mascot-pet 未删）。
+#
+# 怎么敲：
+#   ops/xiaoccctl status      # 一行摘要 + 日志尾巴；运行中退出 0，未运行退出 1
+#   ops/xiaoccctl start       # 幂等；plist 与仓库原件对齐后 bootstrap
+#   ops/xiaoccctl stop        # bootout；本来就没跑也算成功
+#   ops/xiaoccctl restart
+#   ops/xiaoccctl doctor      # 自检 9 项（含「窗口是否真的在屏幕上」）—— 人不在机器前时看这个
+#   ops/xiaoccctl logs [err]  # 看面板日志
+#
+# 文件在哪：
+#   plist        ~/Library/LaunchAgents/ai.hermes.xiaocc.plist（仓库原件在 ops/ 下，start 时会覆盖式同步）
+#   面板日志     ~/Library/Logs/xiaocc/panel.log、panel.err.log（各自 >200KB 覆盖式轮转成 .1）
+#   本脚本日志   ~/Library/Logs/xiaocc/xiaoccctl.log
+#   状态落盘     ~/Library/Logs/xiaocc/state.json（doctor/status/start/stop 都会刷新）
+#
+# 回滚（30 秒内恢复旧桌宠，见 ops/README.md 第 4 节）：
+#   ops/xiaoccctl stop
+#   launchctl bootout "gui/$(id -u)/ai.hermes.mascot-pet"          # 若已 bootout 会报 not loaded，忽略
+#   cp ops/baseline/ai.hermes.mascot-pet.plist.bak ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
+#   launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
+#
+# 静默约束：不弹任何窗（无 osascript / display dialog / alert），只走 stdout / stderr + 退出码。
+
+emulate -L zsh
+set -u
+
+SCRIPT_DIR="${0:A:h}"
+PROJECT_DIR="${SCRIPT_DIR:h}"
+LABEL="ai.hermes.xiaocc"
+OLD_LABEL="ai.hermes.mascot-pet"
+GUARD_LABEL="ai.hermes.mascot-pet.keepawake"   # 睡眠闸守卫：名字留着，依赖已改成指向 xiaocc
+DOMAIN="gui/$(id -u)"
+PLIST_SRC="$PROJECT_DIR/ops/ai.hermes.xiaocc.plist"
+PLIST_DST="$HOME/Library/LaunchAgents/ai.hermes.xiaocc.plist"
+LOGDIR="$HOME/Library/Logs/xiaocc"
+STATE="$LOGDIR/state.json"
+PANEL_LOG="$LOGDIR/panel.log"
+PANEL_ERR="$LOGDIR/panel.err.log"
+CTL_LOG="$LOGDIR/xiaoccctl.log"
+PY="$PROJECT_DIR/.venv/bin/python"
+ENTRY="$PROJECT_DIR/.venv/bin/xiaocc"
+
+# 退出码：0 正常 / 1 未运行 / 2 用法错 / 3 没装 / 4 操作或自检失败
+mkdir -p "$LOGDIR" 2>/dev/null
+
+_rotate() {  # _rotate <file> <阈值字节>
+  local f="$1" cap="${2:-200000}" sz
+  [[ -f "$f" ]] || return 0
+  sz=$(wc -c <"$f" 2>/dev/null | tr -d ' ')
+  [[ -n "${sz:-}" ]] && (( sz > cap )) && mv -f "$f" "$f.1"
+  return 0
+}
+
+_log() {
+  _rotate "$CTL_LOG"
+  printf '%s xiaoccctl %s\n' "$(date '+%F %T')" "$*" >>"$CTL_LOG" 2>/dev/null
+}
+
+_loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 }
+_pid()    { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3; exit}' }
+_corner() { /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST_DST" 2>/dev/null || print '?' }
+_installed() { [[ -f "$PLIST_DST" ]] }
+
+# 窗口采样：唯一的「进程活着但看不见」硬证据。
+# 输出两行：第 1 行 JSON（喂 state.json），第 2 行人话（给 doctor 显示）。
+_window_json() {
+  local pid="$1"
+  [[ -x "$PY" ]] || { print '{"count":-1,"windows":[],"error":"no-python"}'; print "无 python，抓不到"; return 0 }
+  "$PY" - "$pid" <<'PYEOF' 2>/dev/null || { print '{"count":-1,"windows":[],"error":"probe-failed"}'; print "抓取失败"; }
+import json, sys
+try:
+    import Quartz
+except Exception as exc:                       # pyobjc 缺失：如实报告，不假装
+    print(json.dumps({"count": -1, "windows": [], "error": f"no-quartz:{exc}"}))
+    print("无 Quartz")
+    raise SystemExit(0)
+pid = int(sys.argv[1])
+opts = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+infos = Quartz.CGWindowListCopyWindowInfo(opts, Quartz.kCGNullWindowID)
+mine = []
+for w in infos:
+    if w.get("kCGWindowOwnerPID") != pid:
+        continue
+    b = dict(w.get("kCGWindowBounds") or {})
+    mine.append({"x": round(b.get("X", 0)), "y": round(b.get("Y", 0)),
+                 "w": round(b.get("Width", 0)), "h": round(b.get("Height", 0)),
+                 "layer": w.get("kCGWindowLayer")})
+print(json.dumps({"count": len(mine), "windows": mine}))
+print("; ".join(f"{w['x']},{w['y']} {w['w']}x{w['h']} layer={w['layer']}" for w in mine) or "无窗口")
+PYEOF
+}
+
+_write_state() {  # _write_state <last_error>
+  local last="${1:-}" pid loaded_str win
+  pid="$(_pid)"; loaded_str=false; _loaded && loaded_str=true
+  win=$([[ -n "${pid:-}" ]] && _window_json "$pid" || print '{"count":null,"windows":[]}')
+  win="${win%%$'\n'*}"                          # 只要第 1 行 JSON，人话那行喂给 state.json 会解析失败
+  [[ -x "$PY" ]] || { print -u2 "xiaoccctl: 找不到 $PY，state.json 未更新"; return 0 }
+  "$PY" - "$STATE" "$LABEL" "$PLIST_DST" "$PANEL_LOG" "$PANEL_ERR" \
+        "${loaded_str}" "${pid:-}" "$(_corner)" "$last" "$win" <<'PYEOF' 2>/dev/null
+import json, sys, datetime, pathlib
+state, label, plist, plog, elog, loaded, pid, corner, last, win = sys.argv[1:11]
+try:
+    window = json.loads(win)
+except Exception:
+    window = {"count": None, "windows": [], "error": "unparsable"}
+doc = {
+    "ts": datetime.datetime.now().astimezone().isoformat(timespec="seconds"),
+    "label": label,
+    "installed": pathlib.Path(plist).exists(),
+    "loaded": loaded == "true",
+    "pid": int(pid) if pid.strip().isdigit() else None,
+    "corner": corner,
+    "plist": plist,
+    "log": plog,
+    "err_log": elog,
+    "window": window,
+    "last_error": last.strip() or None,
+}
+pathlib.Path(state).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+PYEOF
+  return 0
+}
+
+# 睡眠闸守卫：KeepAlive.OtherJobEnabled 只管「启动」，所以 stop→start 之后守卫不会自己回来
+# （它看到 label 不在就退出，这是它设计的一部分）。每次 start 都补一次，别让机器在无人察觉时
+# 回到「空闲 1 分钟就睡」。
+_ensure_guard() {
+  local st
+  st=$(launchctl print "$DOMAIN/$GUARD_LABEL" 2>/dev/null | awk '/^[[:space:]]*state = /{print $3; exit}')
+  if [[ "${st:-}" == "running" ]]; then
+    print "睡眠闸守卫：运行中"
+    return 0
+  fi
+  launchctl kickstart "$DOMAIN/$GUARD_LABEL" >/dev/null 2>&1 \
+    || launchctl bootstrap "$DOMAIN" "$HOME/Library/LaunchAgents/$GUARD_LABEL.plist" >/dev/null 2>&1
+  sleep 2
+  st=$(launchctl print "$DOMAIN/$GUARD_LABEL" 2>/dev/null | awk '/^[[:space:]]*state = /{print $3; exit}')
+  if [[ "${st:-}" == "running" ]]; then
+    print "睡眠闸守卫：已补起（keepalive job 之前因 stop 停在 exited）"
+    _log "start: 补起睡眠闸守卫"
+    return 0
+  fi
+  print -u2 "xiaoccctl: 睡眠闸守卫没起来（state=${st:-unknown}）—— 机器空闲 1 分钟会睡"
+  _log "start: 守卫补起失败 state=${st:-unknown}"
+  return 1
+}
+
+cmd_start() {
+  [[ -f "$PLIST_SRC" ]] || { print -u2 "xiaoccctl: 仓库原件不存在：$PLIST_SRC"; return 3 }
+  _rotate "$PANEL_LOG"; _rotate "$PANEL_ERR"
+  if _loaded && [[ -n "$(_pid)" ]]; then
+    print "已在运行 (pid=$(_pid) 停靠点=$(_corner))"
+    _log "start: 已在运行 pid=$(_pid)"
+    _ensure_guard
+    _write_state ""; return 0
+  fi
+  cp -f "$PLIST_SRC" "$PLIST_DST" || { print -u2 "xiaoccctl: 写 plist 失败"; return 4 }
+  _loaded && launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1   # 半死状态：先清干净
+  local err
+  err=$(launchctl bootstrap "$DOMAIN" "$PLIST_DST" 2>&1); local rc=$?
+  if (( rc != 0 )); then
+    print -u2 "xiaoccctl: bootstrap 失败 (rc=$rc)：$err"
+    print -u2 "--- panel.err.log 末尾 ---"
+    tail -n 15 "$PANEL_ERR" 2>/dev/null | sed 's/^/| /'
+    _log "start: bootstrap 失败 rc=$rc $err"
+    _write_state "bootstrap 失败 rc=$rc：$err"; return 4
+  fi
+  local i pid=""
+  for i in {1..30}; do
+    pid="$(_pid)"; [[ -n "$pid" ]] && break
+    sleep 0.5
+  done
+  if [[ -z "$pid" ]]; then
+    print -u2 "xiaoccctl: 15 秒内没拿到 pid —— 面板没起来"
+    tail -n 15 "$PANEL_ERR" 2>/dev/null | sed 's/^/| /'
+    _log "start: 超时无 pid"
+    _write_state "start 后 15 秒内没有 pid"; return 4
+  fi
+  print "已启动 (pid=$pid 停靠点=$(_corner))"
+  _log "start: pid=$pid corner=$(_corner)"
+  _ensure_guard
+  _write_state ""; return 0
+}
+
+cmd_stop() {
+  if ! _loaded; then
+    print "本来就没在跑（$LABEL 未加载）"
+    _log "stop: 未加载，无事可做"
+    _write_state ""; return 0
+  fi
+  local pid; pid="$(_pid)"
+  launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1
+  local i
+  for i in {1..20}; do
+    _loaded || break
+    sleep 0.5
+  done
+  if _loaded; then
+    launchctl kill TERM "$DOMAIN/$LABEL" >/dev/null 2>&1
+    for i in {1..6}; do _loaded || break; sleep 0.5; done
+  fi
+  if _loaded; then
+    print -u2 "xiaoccctl: 已 bootout 但 job 仍在（pid=$(_pid)），请查 $CTL_LOG"
+    _log "stop: 残留 pid=$(_pid)"
+    _write_state "stop 后 job 仍在"; return 4
+  fi
+  print "已停止（原 pid=${pid:-?}）"
+  _log "stop: 已停止 原 pid=${pid:-?}"
+  _write_state ""; return 0
+}
+
+cmd_status() {
+  _installed || { print "小cc: 未安装（缺 $PLIST_DST）"; return 3; }
+  local pid; pid="$(_pid)"
+  if _loaded && [[ -n "$pid" ]]; then
+    local et; et=$(ps -o etime= -p "$pid" 2>/dev/null | tr -d ' ')
+    print "小cc: 运行中 pid=$pid 停靠点=$(_corner) 已运行=${et:-?}"
+    print "  日志: $PANEL_LOG"
+  else
+    print "小cc: 未运行（停靠点=$(_corner)）"
+  fi
+  [[ -s "$PANEL_ERR" ]] && tail -n 3 "$PANEL_ERR" | sed 's/^/  | /'
+  [[ -s "$PANEL_LOG" ]] && tail -n 3 "$PANEL_LOG" | sed 's/^/  | /'
+  _write_state ""
+  { _loaded && [[ -n "$pid" ]] } && return 0 || return 1
+}
+
+cmd_doctor() {
+  local fail=0
+  print "== 小cc 自检 $(date '+%F %T') =="
+  if [[ -f "$PLIST_SRC" ]] && cmp -s "$PLIST_SRC" "$PLIST_DST"; then
+    print "✓ ① plist 已安装且与仓库原件一致"
+  else
+    print "✗ ① plist 缺失或与仓库不一致（$PLIST_DST）"; fail=1
+  fi
+  if [[ -x "$ENTRY" ]] && [[ -x "$PY" ]]; then
+    print "✓ ② venv 入口可执行"
+  else
+    print "✗ ② venv 入口不可执行：$ENTRY"; fail=1
+  fi
+  local loaded=false; _loaded && loaded=true
+  [[ "$loaded" == true ]] && print "✓ ③ label $LABEL 已加载" || { print "✗ ③ label $LABEL 未加载"; fail=1; }
+  local pid; pid="$(_pid)"
+  if [[ -n "$pid" ]] && ps -p "$pid" >/dev/null 2>&1; then
+    print "✓ ④ 进程活着 pid=$pid"
+  else
+    print "✗ ④ 没有活着的进程"; fail=1
+  fi
+  local win count human
+  if [[ -n "$pid" ]]; then
+    win=$(_window_json "$pid")
+    human="${win##*$'\n'}"
+    win="${win%%$'\n'*}"
+    count=$(print -r -- "$win" | sed -n 's/.*"count":[ ]*\([-0-9]*\).*/\1/p')
+    if [[ "${count:-0}" -gt 0 ]]; then
+      print "✓ ⑤ 窗口在屏幕上：${human:-?}"
+    else
+      print "✗ ⑤ 进程活着但抓不到窗口（count=${count:-?}）—— 屏幕上看不见"; fail=1
+    fi
+  else
+    print "✗ ⑤ 无进程，窗口无从谈起"; fail=1
+  fi
+  local now mt age m
+  now=$(date +%s); mt=0
+  for f in "$PANEL_LOG" "$PANEL_ERR"; do
+    [[ -f "$f" ]] || continue
+    m=$(stat -f %m "$f" 2>/dev/null || print 0)
+    (( m > mt )) && mt=$m
+  done
+  if (( mt > 0 )); then
+    age=$(( now - mt ))
+    if (( age < 900 )); then print "✓ ⑥ 日志新鲜（${age}s 前有写入；面板只在启动/异常时写，15 分钟内有动静即可）"
+    else print "✗ ⑥ 日志 ${age}s 没动静（面板可能卡住）"; fail=1; fi
+  else
+    print "✗ ⑥ 完全没有日志文件"; fail=1
+  fi
+  if pmset -g assertions 2>/dev/null | grep -q 'PreventUserIdleSystemSleep  *1'; then
+    print "✓ ⑦ 有人持有睡眠闸（PreventUserIdleSystemSleep=1）"
+  else
+    print "✗ ⑦ 没人持有睡眠闸 —— 机器空闲 1 分钟就会睡（sleep=1）"; fail=1
+  fi
+  if launchctl print "$DOMAIN/$OLD_LABEL" >/dev/null 2>&1; then
+    print "✗ ⑧ 旧桌宠 $OLD_LABEL 还在加载（取代小汐就不该在）"; fail=1
+  else
+    print "✓ ⑧ 旧桌宠已停用"
+  fi
+  local nlines=0 m2
+  for f in "$PANEL_LOG" "$PANEL_ERR"; do
+    [[ -f "$f" ]] || continue
+    m2=$(wc -l <"$f" 2>/dev/null | tr -d ' ')
+    nlines=$(( nlines + ${m2:-0} ))
+  done
+  if (( nlines > 0 )); then
+    print "✓ ⑨ 日志可读（共 ${nlines} 行）"
+  else
+    print "✗ ⑨ 日志为空 —— 面板起来了吗"; fail=1
+  fi
+  (( fail == 0 )) && print "== 全部通过 ==" || print "== 有失败项（见上面 ✗）=="
+  _write_state "$([[ $fail == 0 ]] && print '' || print 'doctor 有失败项')"
+  (( fail == 0 )) && return 0 || return 4
+}
+
+cmd_logs() {
+  if [[ "${1:-}" == "err" ]]; then tail -n 40 "$PANEL_ERR"; else tail -n 40 "$PANEL_LOG"; fi
+  return 0
+}
+
+case "${1:-status}" in
+  start)   cmd_start ;;
+  stop)    cmd_stop ;;
+  restart) cmd_stop || exit 4; cmd_start ;;
+  status)  cmd_status ;;
+  doctor)  cmd_doctor ;;
+  logs)    shift; cmd_logs "${1:-}" ;;
+  -h|--help|help)
+    print "用法: xiaoccctl {status|start|stop|restart|doctor|logs [err]}"
+    print "退出码: 0 正常 / 1 未运行 / 2 用法错 / 3 没装 / 4 操作或自检失败"
+    ;;
+  *)
+    print -u2 "xiaoccctl: 不认得的子命令 '$1'"
+    print -u2 "用法: xiaoccctl {status|start|stop|restart|doctor|logs [err]}"
+    exit 2 ;;
+esac
