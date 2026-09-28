@@ -100,7 +100,8 @@ def _backend_note(name: str, target: str) -> str:
     return note
 
 
-def load_source(name: str, **kwargs: Any) -> StatusSource:
+def load_source(name: str, *args: Any, **kwargs: Any) -> StatusSource:
+    """按名字造一个状态源。第三方源的构造参数原样透传（``名字:参数`` → 第一个位置参数）。"""
     factory = _BUILTIN_SOURCES.get(name)
     if factory is None:
         ep = _entry_points(SOURCES).get(name)
@@ -108,7 +109,7 @@ def load_source(name: str, **kwargs: Any) -> StatusSource:
             known = ", ".join(sorted(available_sources()))
             raise KeyError(f"没有名为 {name!r} 的状态源。可用：{known}")
         factory = ep.load()
-    return factory(**kwargs)
+    return factory(*args, **kwargs)
 
 
 def load_backend(name: str, **kwargs: Any) -> Any:
@@ -133,9 +134,13 @@ def parse_source_spec(spec: str) -> StatusSource:
         # 不带参数的源允许省略冒号（hermes 会自动挑最新的 profile）
         if name == "hermes":
             return HermesSource()
-        raise ValueError(
-            f"状态源要写成 '名字:参数'，收到 {spec!r}（例如 file:~/.xiaocc/status.json）"
-        )
+        try:
+            # 第三方源同样允许省略冒号：走它自己的默认参数
+            return load_source(name)
+        except KeyError as exc:
+            raise ValueError(
+                f"状态源要写成 '名字:参数'，收到 {spec!r}（例如 file:~/.xiaocc/status.json）"
+            ) from exc
     if name == "file":
         return FileSource(arg)
     if name == "command":
