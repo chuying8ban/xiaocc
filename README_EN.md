@@ -68,7 +68,7 @@ comes from whichever source is talking, so the Chinese in the screenshot below i
 reporting in its own language, not a hardcoded string.
 
 ```
-( >  < ) 小cc [working]  xiaocc · 正在执行 read_file
+( >  < ) 小cc [working]  群聊 · 准备调用工具
 ```
 
 Add `--once` to run a single frame, which is how the tests and CI check the whole path end to end.
@@ -196,6 +196,15 @@ That discipline paid for itself three times. The collapsed handle was drawn in s
 captures returned the previous frame and four screenshots had identical bytes. The smiling eye arcs
 inherited a stroke colour from the shell and faded to grey. The idle face was frowning. None of the
 three is visible in a careful read of the source.
+
+A resident panel can also fail by burning power, so deployment is gated instead of trusted.
+`ops/xiaoccctl arm` starts the panel, warms it up, then measures 60 seconds of CPU and checks that the
+picture really is moving on screen. Failing either check, or not getting complete evidence, stops the
+panel again rather than leaving it running. While it runs, `ai.hermes.xiaocc.watchdog` samples CPU
+every five minutes regardless of display state, and stops the panel after three consecutive samples
+above 8%, leaving the reason on disk. Measured here at 15fps: 4.3% steady CPU over a 20 second window,
+with the self-evidence check `xiaocc probe` exiting 0. Measurement details and the rollback commands
+are in [ops/README.md](ops/README.md).
 
 `docs/` is mostly Chinese for now, with English where it matters most:
 [sources (EN)](docs/sources_EN.md), [sources (中文)](docs/sources.md),
