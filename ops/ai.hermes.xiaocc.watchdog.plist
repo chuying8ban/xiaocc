@@ -23,6 +23,17 @@
 	<key>LimitLoadToSessionType</key>
 	<string>Aqua</string>
 
+	<key>EnvironmentVariables</key>
+	<dict>
+		<!-- 阈值/连续次数/采样窗口做成可配置项（脚本里的默认值相同，改这里不用改代码） -->
+		<key>XIAOCC_WD_THRESHOLD</key>
+		<string>8</string>
+		<key>XIAOCC_WD_STREAK</key>
+		<string>3</string>
+		<key>XIAOCC_WD_WINDOW</key>
+		<string>10</string>
+	</dict>
+
 	<key>StandardOutPath</key>
 	<string>/Users/a29285/Library/Logs/xiaocc/watchdog.out.log</string>
 	<key>StandardErrorPath</key>
