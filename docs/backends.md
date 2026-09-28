@@ -127,10 +127,14 @@ xiaocc run -b appkit --backend-opt at=bottom-left --backend-opt scale=0.8 --back
 | 启动方式 | 屏幕 | CPU | 圈速 |
 | --- | --- | --- | --- |
 | 前台 `xiaocc run -b appkit` | 醒 | 4.2% | ≈30/s（1.0x） |
-| launchd + `ProcessType=Interactive` | 醒 | 16~18% | 28~30/s（0.94x） |
-| launchd 不带 `ProcessType` | 醒 | 8.2% | **11.5/s（0.38x，被节流）** |
+| launchd + `ProcessType=Interactive` | 醒 | 16.8% | 27.0/s（0.90x） |
+| launchd + `ProcessType=Adaptive` | 醒 | 16.6% | 27.8/s（0.93x） |
+| launchd 不带 `ProcessType` | 醒 | 6.5% | **10.3/s（0.34x，被节流）** |
 | launchd 不带 `ProcessType` | 睡 | 4.6% | **5.9/s（0.20x，被节流）** |
-| launchd + `ProcessType=Adaptive` | 醒 | 18.4% | 28/s（0.94x） |
+
+「不带键」那路从 CPU 上看最省（4.6~6.5%），**但它是靠把画面砍到 1/3 换来的** —— 光看 `ps` 会把它当成
+通过，这正是门槛要同时看圈速的原因。三条 launchd 路里没有一条同时满足「<5% 且 ≈30/s」：托管本身
+比前台贵约 4 倍（同样 ~28/s 的圈速，16.6~16.8% vs 前台 4.2%），所以**优化要冲着每帧画的东西去**。
 
 「不带键」那条只省了 CPU 是因为**画面真卡了**，光看 `ps` 会把它当成通过 —— 这就是门槛要两个数的原因。
 

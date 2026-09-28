@@ -23,11 +23,11 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import plistlib
 import subprocess
 import sys
-import json
 import tempfile
 import time
 from pathlib import Path
@@ -172,7 +172,7 @@ def main() -> int:
     print(f"仓库 {REPO}  源={args.source}  fps={args.fps}  测量窗口={args.seconds}s")
     print(f"显示器状态：{state}")
     results: dict[str, dict] = {}
-    if args.arm in ("both", "interactive"):
+    if args.arm in ("both", "interactive", "all"):
         v = arm("launchd + ProcessType=Interactive", "Interactive",
                 args.seconds, args.warmup, args.source, args.fps)
         if v is not None:
@@ -189,25 +189,24 @@ def main() -> int:
         if v is not None:
             results["adaptive"] = v
 
-    if len(results) >= 2:
-        a = results.get("interactive") or results.get("adaptive") or results["plain"]
-        b = results.get("adaptive") or results["plain"]
-        print(f"\nInteractive / 无键 = {a['cpu'] / b['cpu']:.2f}x（只看 CPU）")
-        # 门槛是**两件事**：省电（CPU < 5%）且没被节流（圈速 ≈ fps）。
-        # 只看 CPU 会把「卡成幻灯片但很省」判成通过；只看圈速会把忙等放过去。
-        cpu_ok = b["cpu"] < 5.0
-        loops = b["loops"]
-        rate_ok = loops is not None and 0.7 * args.fps <= loops <= 1.3 * args.fps
-        verdict = "通过" if (cpu_ok and rate_ok) else "未通过"
-        why = []
-        if not cpu_ok:
-            why.append(f"CPU {b['cpu']:.1f}% ≥ 5%")
-        if not rate_ok:
-            why.append("圈速读不到" if loops is None
-                       else f"圈速 {loops:.0f}/s 偏离 fps={args.fps} 超 ±30%"
-                            f"（{'被节流' if loops < 0.7 * args.fps else '退回忙等'}）")
-        print("门槛（无键那一路：CPU < 5% **且** 圈速 ≈ fps；可比基准：小汐 4.6~5.0%）："
-              + verdict + ("" if not why else "（" + "；".join(why) + "）"))
+    if results:
+        base_key = "plain" if "plain" in results else next(iter(results))
+        base = results[base_key]
+        print("\n各臂对照（判据是**两件事一起过**：CPU < 5% 且 圈速 ≈ fps ——")
+        print("只看 CPU 会把「卡成幻灯片但很省」判成通过，只看圈速会把忙等放过去）：")
+        for key, val in results.items():
+            loops = val["loops"]
+            cpu_ok = val["cpu"] < 5.0
+            rate_ok = loops is not None and 0.7 * args.fps <= loops <= 1.3 * args.fps
+            why = []
+            if not cpu_ok:
+                why.append(f"CPU {val['cpu']:.1f}%")
+            if not rate_ok:
+                why.append("圈速读不到" if loops is None
+                           else f"圈速 {loops:.0f}/s（{'被节流' if loops < 0.7 * args.fps else '忙等'}）")
+            ratio = f"{val['cpu'] / base['cpu']:.2f}x vs {base_key}"
+            print(f"  {key:12s} CPU={val['cpu']:5.1f}%  圈速={loops or '-'!s:>5s}/s"
+                  f"  {ratio:22s}  {'✅ 过' if (cpu_ok and rate_ok) else '❌ ' + '；'.join(why)}")
     leftovers = sorted(p.name for p in AGENTS_DIR.glob(f"{LABEL_PREFIX}*"))
     print("残留 plist：", leftovers or "无")
     return 0
