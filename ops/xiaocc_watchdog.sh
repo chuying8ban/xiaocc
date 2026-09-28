@@ -93,7 +93,10 @@ PYEOF
 
 PID="$(_pid)"
 if [[ -z "$PID" ]]; then
-  say "面板没在跑 ⇒ 计数清零（看门狗什么都不做）"
+  # 日志卫生：面板被人有意停着（常态）时不要每 5 分钟写一行噪音 —— 只在「上一轮还在跑 / 还有连续计数」时记一笔
+  PREV=$("$PY" -c "import json,sys;d=json.load(open(sys.argv[1])) if __import__('os').path.exists(sys.argv[1]) else {};print(d.get('pid') or 0)" "$STATE" 2>/dev/null || print 0)
+  PREV_STREAK=$("$PY" -c "import json,sys;import os;d=json.load(open(sys.argv[1])) if os.path.exists(sys.argv[1]) else {};print(int(d.get('streak') or 0))" "$STATE" 2>/dev/null || print 0)
+  [[ "$PREV" != "0" || "$PREV_STREAK" != "0" ]] && say "面板没在跑 ⇒ 计数清零（看门狗什么都不做）"
   _write_state 0 "nan" "面板没在跑，计数清零"
   exit 0
 fi

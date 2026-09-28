@@ -159,6 +159,13 @@ A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 过�
   **连续 3 次 > 8%** ⇒ `xiaoccctl stop` + `watchdog.log` + **`watchdog-stop.json` 留痕**（含最后一次 CPU、阈值、`rearm` 提示）。
   面板没在跑 ⇒ 连续计数清零、静默退出（脚本自己几秒就结束，不常驻）。**它不会自动把面板装回来**，修好要人 `arm`。
 * 文件：`~/Library/Logs/xiaocc/watchdog.log`、`watchdog.json`（当前连续计数 + 最近 9 次采样）、`watchdog-stop.json`（只在真动手停时写）。
+* **阈值可配置**：`ops/ai.hermes.xiaocc.watchdog.plist` 的 `EnvironmentVariables` ——
+  `XIAOCC_WD_THRESHOLD`（默认 8，%）、`XIAOCC_WD_STREAK`（默认 3，连续次数）、`XIAOCC_WD_WINDOW`（默认 10，秒）。
+  改完 `launchctl bootout` + `bootstrap` 重载，然后确认 launchd 真的把它交给了脚本：
+  `launchctl print gui/$(id -u)/ai.hermes.xiaocc.watchdog | grep XIAOCC`
+  （**注意**：手敲 `ops/xiaocc_watchdog.sh` 走的是你自己的 shell 环境，看不到 plist 的值 —— 要验 plist 就用 `launchctl kickstart -k` 跑那一拍，再读 `watchdog.json` 里的阈值字段。）
+* **日志口径**（避免每 5 分钟一行噪音）：常态一拍**只更新 `watchdog.json`**；`watchdog.log` 只在四种情况写 ——
+  越界、回到阈值内、真停掉面板、以及「面板刚从有到无」（面板被人有意停着时不重复刷屏）。
 * 停用：`launchctl bootout gui/$(id -u)/ai.hermes.xiaocc.watchdog`。
 * **怎么测（别等 15 分钟）**：`XIAOCC_WD_THRESHOLD=3 XIAOCC_WD_STREAK=1 XIAOCC_WD_WINDOW=4 ops/xiaocc_watchdog.sh`
   —— 实测该组合在面板 4.0% 时立即停掉面板并写出留痕文件；部署默认值（8%/3 次/10s）不会被 3~9% 的常态触发。
