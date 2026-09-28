@@ -33,6 +33,7 @@ from typing import Any
 from ..characters import Character
 from ..engine import Render
 from ..protocol import State
+from . import appkit_art
 from . import window_layout as wl
 from .anchor_store import anchor_path as _anchor_path
 from .anchor_store import load_anchor, save_anchor
@@ -84,6 +85,10 @@ except ImportError as exc:  # pragma: no cover - 取决于环境
 
 #: 动画帧率上限。30fps 足够让动作连贯，又不会让笔记本风扇转起来。
 DEFAULT_FPS = 30.0
+
+#: 谁在推动画面 —— 写进自证据，让外部判据不必靠「圈速低但像素在动」去猜实现形态。
+#: ``self``：本进程每帧重画（判据看圈速 ≈ fps）；``compositor``：交给窗口服务器（判据看像素在动）。
+DRIVER = "self"
 
 #: 收起时把手的呼吸周期（秒）。指纹按这个周期量化相位 —— 呼吸动画一帧都不能少。
 _HANDLE_PULSE_PERIOD = 1.6
@@ -288,6 +293,9 @@ class AppKitBackend(Backend):
         self._started = time.monotonic()
         self._art_cache: dict[str, Any] = {}
         self._art_warnings: set[str] = set()
+        #: 点阵化缓存（见 ``appkit_art``）：角色图这种每帧都画的内容，只光栅化一次。
+        self._bitmaps = appkit_art.BitmapCache()
+        self._last_art_key = ""
         self._last_art: str = "(程序化骨架)"
         self._last_paint_state: str | None = None
         self._last_caption_drawn: str = ""
@@ -455,6 +463,9 @@ class AppKitBackend(Backend):
                     "alive": alive,
                     "at": time.time(),
                     "fps": self.fps,
+            #: 谁在推动画面：``self`` = 本进程每帧重画（圈速应与 fps 同量级）；
+            #: ``compositor`` = 交给窗口服务器做动画（进程该睡着，外部像素判据看「画面在动」）。
+            "driver": DRIVER,
                     "probe_interval_s": _DRIFT_CHECK_PERIOD,
                     "probe_file": str(self.probe_path()),
                     "anchor_file": str(_anchor_path()),
@@ -508,7 +519,7 @@ class AppKitBackend(Backend):
     def probe(self) -> dict[str, Any]:
         """当前窗口的真实状态 —— 自动化证据用，别拿设计文档当结果。"""
         if self._window is None:
-            return {"window": None}
+            return {"window": None, "driver": DRIVER}
         frame = self._window.frame()
         anchor_state, anchor_ok = self._anchor_relation()
         info: dict[str, Any] = {
@@ -1098,15 +1109,40 @@ class AppKitBackend(Backend):
             self._window_local.width - wl.PAD,
             wl.CAPTION_BAND - 6.0,
         )
-        paragraph = NSMutableParagraphStyle.alloc().init()
-        paragraph.setAlignment_(NSTextAlignmentCenter)
-        paragraph.setLineBreakMode_(NSLineBreakByTruncatingTail)
-        attributes = {
-            NSFontAttributeName: NSFont.systemFontOfSize_(11.5),
-            NSForegroundColorAttributeName: self._color(accent, 0.95),
-            NSParagraphStyleAttributeName: paragraph,
-        }
-        NSString.stringWithString_(text).drawInRect_withAttributes_(self._local(band), attributes)
+        self._draw_caption_text(text, accent, band)
+
+    def _draw_caption_text(self, text: str, accent: str, band: wl.Rect) -> None:
+        """把文案点阵化后贴上去（key 含文案与配色，所以只有换状态时才重建）。
+
+        168µs/帧的那笔钱几乎全在建字体/段落/属性字典和重新排版上；文案一秒变一次都算勤的，
+        没有理由每帧重排。
+        """
+        width, height = band.width, band.height
+        key = ("caption", text, accent, round(width, 1), round(height, 1))
+        image = self._bitmaps.get(key)
+        if image is None:
+            paragraph = NSMutableParagraphStyle.alloc().init()
+            paragraph.setAlignment_(NSTextAlignmentCenter)
+            paragraph.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            attributes = {
+                NSFontAttributeName: NSFont.systemFontOfSize_(11.5),
+                NSForegroundColorAttributeName: self._color(accent, 0.95),
+                NSParagraphStyleAttributeName: paragraph,
+            }
+            label = NSString.stringWithString_(text)
+
+            def paint(w: float, h: float, label: Any = label, attributes: Any = attributes) -> None:
+                label.drawInRect_withAttributes_(NSMakeRect(0.0, 0.0, w, h), attributes)
+
+            image = appkit_art.pointize((width, height), paint)
+            if image is None:
+                # 点阵化失败：退回每帧现画（慢，但至少不显示不出东西）
+                NSString.stringWithString_(text).drawInRect_withAttributes_(self._local(band), attributes)
+                return
+            self._bitmaps.put(key, image)
+        image.drawInRect_fromRect_operation_fraction_(
+            self._local(band), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+        )
 
     # —— 造型：角色包优先，程序化骨架兜底 ——————————————————————————————————
 
@@ -1131,6 +1167,7 @@ class AppKitBackend(Backend):
                 self._art_cache[key] = image
         image = self._art_cache[key]
         self._last_art = path.name if image is not None else "(程序化骨架)"
+        self._last_art_key = key
         return image
 
     def _art_path(self, state: State, character: Character) -> Path | None:
@@ -1162,6 +1199,13 @@ class AppKitBackend(Backend):
             width,
             height,
         )
-        image.drawInRect_fromRect_operation_fraction_(
+        # 每帧都走这里：先看有没有点阵化过的那一份（同一张图 + 同一个目标尺寸只做一次）。
+        # SVG 每次直接画都要重新光栅化渐变和路径（实测 522µs/帧），点阵化后只剩贴图。
+        key = (self._last_art_key, round(width, 1), round(height, 1))
+        cached = self._bitmaps.get(key)
+        if cached is None:
+            cached = appkit_art.pointize_image(image, (width, height)) or image
+            self._bitmaps.put(key, cached)
+        cached.drawInRect_fromRect_operation_fraction_(
             target, NSZeroRect, NSCompositingOperationSourceOver, 1.0
         )
