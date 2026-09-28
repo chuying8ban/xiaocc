@@ -44,6 +44,16 @@ xiaocc run --source 'command:mytool status --json' -b terminal --once
 一条坏源没资格盖住别的好源。屏幕上也没有任何别的源说话时，才以 `offline` 呈现、把原因写进
 `detail`。`error` 这个状态只留给「工作流自己报错」，也就是源汇报的 payload 里写着 `state=error`。
 
+```
+# 本机实测：坏命令单独在屏幕上时的样子（有别的源在说话时，这行就不会出现）
+$ xiaocc run --source 'command:没有这个命令' -b terminal --once
+WARNING xiaocc.engine: 状态源 command 出错：FileNotFoundError: 命令不存在：没有这个命令
+( -  - )z 小cc [offline]  状态源故障：command FileNotFoundError: 命令不存在：没有这个命令
+```
+
+故障的处理方式是**抛异常**，不是返回 `ERROR` 事件：引擎负责隔离、按消息去重（同一个故障只写一条
+日志）、并在没有别的源说话时兜底成 `offline`。源里不需要自己记「上次报过没」。
+
 ---
 
 ## 三分钟：写一个真源
@@ -176,7 +186,7 @@ xiaocc run --source my_src -b terminal --once   # 只跑一帧，适合脚本和
 | `poll()` 里干重活（网络请求、扫目录） | 节拍被这一个源拖慢，整只桌宠卡住 | `poll()` 只读「早就准备好的值」，重活放后台线程，或干脆用 `file:` + 定时脚本 |
 | 用了数据里的旧时间戳做 `at` | TTL 误判成过期，状态刚报就退档 | 用当前时间构造事件（`FileSource` 就为此显式把 `at` 换成 `time.time()`） |
 | 在 shell 里写 `command:` 的 JSON | 双引号被 shell 吃掉 → 输出不是合法 JSON，算机械故障，只在 `xiaocc -v` 的日志里看得到 | 把输出逻辑写成脚本文件，别在命令行里跟引号搏斗 |
-| 坏源每轮刷日志 | 日志被刷屏 | 同一个故障只写一次（`CommandSource`、`FileSource` 都这么做） |
+| 坏源每轮刷日志 | 日志被刷屏 | 同一个故障只写一条：由引擎按消息去重（`Engine.tick()`），源里不用自己记「上次报过没」 |
 | 一个永远坏掉的源挂在命令行上 | 它的机械故障只在日志里，画面不受影响 | 想让人看见就在 payload 里报 `state=error`（这是唯一的抢镜方式） |
 | `--source 名字` 报「要写成 '名字:参数'」 | 你的构造函数参数没有默认值 | 给参数加默认值，或者老实写 `名字:参数` |
 | 在 `poll()` 里改共享状态 | 多源合并时行为诡异 | `StatusEvent` 是 frozen 的，源之间不要互相写对方的数据 |

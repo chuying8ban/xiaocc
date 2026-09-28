@@ -49,6 +49,18 @@ business covering up the healthy ones. If nothing else is talking either, the fa
 `offline` with the reason in `detail`. The `error` state is reserved for the workflow itself reporting
 a failure, which in practice means a payload containing `state=error`.
 
+```
+# measured on this machine: a broken command as the only source on screen
+# (with another source talking, this line never appears)
+$ xiaocc run --source 'command:没有这个命令' -b terminal --once
+WARNING xiaocc.engine: 状态源 command 出错：FileNotFoundError: 命令不存在：没有这个命令
+( -  - )z 小cc [offline]  状态源故障：command FileNotFoundError: 命令不存在：没有这个命令
+```
+
+A source handles a failure by **raising**, not by returning an `ERROR` event. The engine isolates it,
+dedupes by message so one failure writes one log line, and falls back to `offline` when nothing else is
+talking. A source does not need to remember what it already reported.
+
 ---
 
 ## Three minutes: write a real source
@@ -190,7 +202,7 @@ state from a debug line.
 | Heavy work inside `poll()` (network calls, directory scans) | That one source drags the clock down and the pet freezes | `poll()` should read a value somebody else already prepared; push the work to a thread, or use `file:` plus a scheduled script |
 | Using a stale timestamp as `at` | The TTL judges the event expired and it drops the moment it arrives | Build the event with the current time (`FileSource` explicitly replaces `at` with `time.time()` for this reason) |
 | Writing `command:` JSON straight into the shell | The shell eats the double quotes, so the output is not valid JSON and the failure only appears in `xiaocc -v` | Put the output in a script file instead of fighting quote rules |
-| A broken source logging every round | The log becomes noise | Report the same failure once (`CommandSource` and `FileSource` both do this) |
+| A broken source logging every round | The log becomes noise | One failure writes one line: the engine dedupes by message (`Engine.tick()`), so a source does not need to remember what it already said |
 | Leaving a permanently broken source on the command line | Its mechanical failure stays in the log and the screen is unaffected | To make it visible, report `state=error` in the payload. That is the only way to take over the screen |
 | `--source name` complains about needing `name:argument` | Your constructor argument has no default | Give it a default, or write `name:argument` |
 | Mutating shared state inside `poll()` | Merging several sources behaves strangely | `StatusEvent` is frozen on purpose; sources should not write into each other's data |
