@@ -25,8 +25,9 @@ ops/xiaoccctl start       # 幂等；顺带补起睡眠闸守卫
 ops/xiaoccctl stop        # bootout；本来没跑也返回 0
 ops/xiaoccctl restart
 ops/xiaoccctl doctor      # 12 项自检，全绿退出 0，有 ✗ 退出 4
-ops/xiaoccctl gate [秒]   # 门槛：60s 稳态 CPU<5% **且** 圈速≈fps（退出码即判据）
-ops/xiaoccctl arm [秒]    # 装回去：start + 暖机 15s + gate，**不达标自动停回来**
+ops/xiaoccctl gate [秒]   # 门槛① CPU<5% ② 外部「画面真在动」；退出码 0 过 / 4 不过 / 5 判不了
+ops/xiaoccctl arm [秒] [--skip-motion]   # 装回去：start+暖机+gate，不过或判不了都自动停回来
+ops/xiaoccctl motion <pid>               # 单跑判据②（连抓窗口位图比像素），对照/排查用
 ops/xiaoccctl logs err    # 看 stderr 末尾 40 行
 ```
 
@@ -95,6 +96,30 @@ ops/xiaoccctl gate 30      # 只量已经在跑的那一份，别动它
 `arm` 的实测（2026-09-29 02:41，部署路径）：CPU **14.7%**（门槛 5%）但自证据**合格**
 （`fps=30 圈速=27.8/s 上一圈睡=30.0ms 状态=working`、快照 0.1s 新、`在锚点=True`）⇒ 判**不通过**并**自动停回去**（`arm rc=4`，job 卸载、无进程）。
 这条区分很关键：**它没在被节流**（圈速 27.8 ≈ fps 30，上圈真睡了 30ms，不是忙等），烧的是**每帧绘制**的钱。
+
+### 判据②：「画面真在动」怎么从外面判（@lead 定，2026-09-29 换的口径）
+
+原口径是「圈速 ≈ fps」，@lead 指出它有盲区：**动画若交给合成器做，进程本就该睡着**，拿圈速判会冤枉一条更好的实现。
+所以判据②改成外部可观测的像素变化：连抓 3 张该 pid **主窗口**的位图（间隔 0.7s，窗口按「屏幕范围内面积最大」挑），
+连续两帧原始字节差异 > 0.05% 即「在动」。另留一条**反忙等护栏**：圈速 > 2×fps 也判不过（别用 CPU 数字掩盖空转）。
+
+```sh
+ops/xiaoccctl motion <pid>     # 单独跑像素判据（对照/排查用）
+ops/xiaoccctl gate 30          # 判据① + 判据② 一起判，退出码：0 过 / 4 不过 / 5 判不了
+```
+
+**屏幕睡着/锁屏时判据②不可判读**（屏上抓不到别人的窗口，`CGWindowListCreateImage` 返回 None）：
+这时 gate 退出 **5**、`arm` **停回去但不算故障**，并提示「屏幕醒着时重跑」；
+只有明确写 `ops/xiaoccctl arm 60 --skip-motion` 才会「只验 CPU」放行，且会在 `xiaoccctl.log` 里留痕。
+（所以人不在机器前时 `arm` 给不出完整判定 —— 这是有意为之：宁可说「证据不全」，也不要凭半个证据把面板装上桌面。）
+
+判据②的**正对照**是 `ops/motion_positive_control.py`（自开一个 30fps 自绘窗口，必定在动），
+测完用 `ops/xiaoccctl motion <它的 pid>` 必须得到 `changed=true`；**它要求屏幕醒着且未锁屏**，
+锁屏时连这个对照窗都不在屏上（抓图 None ⇒ 判「不可判读」，不会误报成「静止」）。
+已验的负对照：桌面层（1512×982，Window Server）连抓三次 ⇒ `changed=false`、差异 0.0%。
+
+**顺带一条实测（别照抄「屏幕睡=数字低」）**：屏幕睡着+锁屏时，Interactive 这一路仍量到 **14.6%**
+（它照画不误）；@coder 那张表里「不带键+屏幕睡 = 4.6%」是**被节流**那一臂的特例，不是通用规律。
 
 **手工复核**（不信脚本时）：
 

@@ -10,8 +10,8 @@
 #   ops/xiaoccctl stop        # bootout；本来就没跑也算成功
 #   ops/xiaoccctl restart
 #   ops/xiaoccctl doctor      # 自检 12 项（含「窗口是否真的在屏幕上」「自证据：圈速≈fps」）—— 人不在机器前时看这个
-#   ops/xiaoccctl gate [秒]   # 门槛测量：60s 稳态 CPU <5% 且 圈速 ≈ fps（@lead 定的门槛，退出码即判据）
-#   ops/xiaoccctl arm [秒]    # 装回去：start + 暖机 + gate，**不达标自动停回来**
+#   ops/xiaoccctl gate [秒]   # 判据① 60s 稳态 CPU <5%；判据② 外部「画面真在动」（连抓窗口位图比像素）
+#   ops/xiaoccctl arm [秒]    # 装回去：start + 暖机 + gate，不达标/证据不全一律自动停回来
 #   ops/xiaoccctl logs [err]  # 看面板日志
 #
 # 文件在哪：
@@ -68,13 +68,26 @@ _pid()    { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pi
 _corner() { /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST_DST" 2>/dev/null || print '?' }
 _installed() { [[ -f "$PLIST_DST" ]] }
 
-# 显示器醒睡：门槛数字必须连同它一起记录 —— 屏幕睡着时 CoreAnimation 停画，CPU 天然偏低，两臂不可比。
+# 显示器醒睡 + 锁屏：门槛数字必须连同它一起记录 —— 屏幕睡着/锁着时 CoreAnimation 停画、
+# 别的进程的窗口根本不在屏上，CPU 天然偏低、像素判据也没法判读，两臂不可比。
 _display_state() {
   [[ -x "$PY" ]] || { print "未知"; return 0 }
   "$PY" - <<'PYEOF' 2>/dev/null || print "未知"
 import Quartz
-d = Quartz.CGMainDisplayID()
-print("睡着（数字偏低，不可与醒着的臂比较）" if Quartz.CGDisplayIsAsleep(d) else "醒着")
+asleep = bool(Quartz.CGDisplayIsAsleep(Quartz.CGMainDisplayID()))
+try:
+    sess = Quartz.CGSessionCopyCurrentDictionary() or {}
+    locked = bool(sess.get("CGSSessionScreenIsLocked"))
+except Exception:
+    locked = False
+if asleep and locked:
+    print("睡着+锁屏")
+elif asleep:
+    print("睡着")
+elif locked:
+    print("锁屏")
+else:
+    print("醒着")
 PYEOF
 }
 
@@ -95,6 +108,74 @@ try:
 except Exception:
     print("nan"); raise SystemExit(0)
 print(f"{100 * (b - a) / n:.1f}")
+PYEOF
+}
+
+# 外部可观测的「画面真在动」：连抓 2~3 张窗口位图比字节。这是 @lead 定的第二判据 ——
+# 换成「合成器驱动动画」后进程本就该睡着，拿圈速判会冤枉一条更好的实现，所以必须从外面看像素。
+_motion_json() {  # _motion_json <pid> [采样数=3] [间隔秒=0.7]
+  local pid="$1" samples="${2:-3}" gap="${3:-0.7}"
+  [[ -x "$PY" ]] || { print '{"changed":null,"error":"no-python"}'; return 0 }
+  "$PY" - "$pid" "$samples" "$gap" <<'PYEOF' 2>/dev/null || print '{"changed":null,"error":"probe-failed"}'
+import json, sys, time
+try:
+    import Quartz
+except Exception as exc:
+    print(json.dumps({"changed": None, "error": f"no-quartz:{exc}"})); raise SystemExit(0)
+pid, samples, gap = int(sys.argv[1]), int(sys.argv[2]), float(sys.argv[3])
+opts = Quartz.kCGWindowListOptionOnScreenOnly | Quartz.kCGWindowListExcludeDesktopElements
+
+def grab():
+    infos = [w for w in Quartz.CGWindowListCopyWindowInfo(opts, Quartz.kCGNullWindowID)
+             if w.get("kCGWindowOwnerPID") == pid]
+    if not infos:
+        return None, None
+    # 一个 pid 可能有多个窗口（阴影层、状态项、离屏的巨大辅助窗…）：先在屏幕范围内的窗口里挑面积最大的那个，
+    # 找不到再看全体（避免选中 30000x30000 那种必然抓不到位图的离屏窗）
+    disp = dict(Quartz.CGDisplayBounds(Quartz.CGMainDisplayID()))
+
+    def area(w):
+        b = dict(w.get("kCGWindowBounds") or {})
+        return b.get("Width", 0) * b.get("Height", 0)
+
+    def on_display(w):
+        b = dict(w.get("kCGWindowBounds") or {})
+        return (b.get("X", 0) + b.get("Width", 0) > disp.get("X", 0)
+                and b.get("X", 0) < disp.get("X", 0) + disp.get("Width", 0)
+                and b.get("Y", 0) + b.get("Height", 0) > disp.get("Y", 0)
+                and b.get("Y", 0) < disp.get("Y", 0) + disp.get("Height", 0))
+
+    candidates = [w for w in infos if on_display(w)] or infos
+    win = max(candidates, key=area)
+    img = Quartz.CGWindowListCreateImage(
+        Quartz.CGRectNull, Quartz.kCGWindowListOptionIncludingWindow,
+        win["kCGWindowNumber"], Quartz.kCGWindowImageBoundsIgnoreFraming)
+    if img is None:
+        return None, win
+    data = Quartz.CGDataProviderCopyData(Quartz.CGImageGetDataProvider(img))
+    return bytes(data) if data is not None else b"", win
+
+shots, rect = [], None
+for i in range(max(2, samples)):
+    blob, win = grab()
+    if win is not None:
+        b = dict(win.get("kCGWindowBounds") or {})
+        rect = [round(b.get("X", 0)), round(b.get("Y", 0)), round(b.get("Width", 0)), round(b.get("Height", 0))]
+    shots.append(blob)
+    if i != max(2, samples) - 1:
+        time.sleep(gap)
+
+if any(s is None for s in shots):
+    print(json.dumps({"changed": None, "error": "抓不到窗口位图", "rect": rect})); raise SystemExit(0)
+best = 0.0
+for a, b in zip(shots, shots[1:]):
+    if len(a) != len(b) or not a:
+        best = 100.0 if a != b else best
+        continue
+    diff = sum(1 for x, y in zip(a, b) if x != y)
+    best = max(best, 100.0 * diff / len(a))
+print(json.dumps({"changed": best > 0.05, "max_diff_pct": round(best, 3),
+                  "shots": len(shots), "gap_s": gap, "rect": rect}))
 PYEOF
 }
 
@@ -366,8 +447,16 @@ PYEOF
       print "✓ ⑪ 自证据：省电且没被节流（圈速 ≈ fps）"
       print -r -- "$pre" | sed -n '2,4p' | sed 's/^/    | /'
     elif (( probe_rc == 1 )); then
-      print "✗ ⑪ 自证据不合格（圈速偏了／快照过期／进程已不在）："
-      print -r -- "$pre" | sed 's/^/    | /'; fail=1
+      # 圈速低不等于故障：动画交给合成器做时进程本就该睡着（@lead 定的新口径）。
+      # 所以先看外部像素 —— 画面在动就只提示，画面静止才是真故障。
+      local mo
+      mo=$(_motion_json "$pid" 3 0.7)
+      if [[ "$(_json_get "$mo" changed)" == "true" ]]; then
+        print "ℹ ⑪ 圈速偏低但外部画面在动（合成器驱动动画的合法形态）：$(print -r -- "$mo" | sed 's/^.*"max_diff_pct": //;s/,.*//')% 字节在变"
+      else
+        print "✗ ⑪ 自证据不合格（圈速偏了／快照过期／进程已不在）且外部画面静止："
+        print -r -- "$pre" | sed 's/^/    | /'; fail=1
+      fi
     else
       print "ℹ ⑪ 没有自证据文件（面板还没跑过，或 XIAOCC_PROBE_FILE 指到了别处）"
     fi
@@ -387,10 +476,13 @@ cmd_logs() {
   return 0
 }
 
-# 门槛测量（@lead 定的）：CPU < 5% **且** 圈速 ≈ fps，两个数都要过；屏幕醒睡状态一并记录。
-# 只量在跑的那一份 —— 手工前台跑是另一把尺子（实测 4.2% vs 托管 15~17%）。
+_json_get() { print -r -- "$1" | sed -n "s/.*\"$2\": *\([^,}]*\).*/\1/p" | head -1 | tr -d ' '; }
+
+# 门槛测量（@lead 定的）：判据① CPU < 5%；判据② **外部可观测的画面真在动**（像素在变），
+# 外加一条反忙等护栏（圈速远超 fps = 又退回空转）。圈速不再是硬判据 —— 动画若交给合成器做，
+# 进程本就该睡着，拿圈速判会冤枉一条更好的实现。
 cmd_gate() {
-  local secs="${1:-60}" pid cpu disp probe_rc
+  local secs="${1:-60}" pid cpu disp probe_out probe_rc motion m_changed m_pct astate loops fps busy cpu_ok=0 motion_ok=0 note=""
   _installed || { print -u2 "xiaoccctl: 没安装（$PLIST_DST）"; return 3; }
   pid="$(_pid)"
   if [[ -z "$pid" ]]; then
@@ -398,33 +490,87 @@ cmd_gate() {
     return 4
   fi
   disp="$(_display_state)"
-  print "== 门槛测量：${secs}s 稳态 / 显示状态：${disp} =="
-  [[ "$disp" == 睡着* ]] && print "⚠️ 屏幕睡着时 CoreAnimation 停画，CPU 会天然偏低 —— 这个数不能跟醒着的臂比"
+  print "== 门槛测量：${secs}s 稳态 CPU + 外部画面判据 / 显示状态：${disp} =="
+  if [[ "$disp" != "醒着" ]]; then
+    print "⚠️ 显示状态不是「醒着」⇒ 判据②（画面真在动）本次**不可判读**（不算过、也不算故障），CPU 数字也偏低不可比。"
+  fi
   cpu=$(_cpu_pct "$pid" "$secs")
-  print "  CPU：${cpu}%（门槛 <5%）"
-  print "  自证据（圈速必须 ≈ fps，否则「省电」只是被节流）："
-  "$ENTRY" probe 2>&1 | sed 's/^/    | /'
-  probe_rc=${pipestatus[1]:-${PIPESTATUS[0]}}
-  local cpu_ok=0
+  print "  A) CPU：${cpu}%（门槛 <5%）"
+
+  probe_out=$("$ENTRY" probe 2>&1); probe_rc=$?
+  motion=$(_motion_json "$pid" 3 0.7)
+  m_changed=$(_json_get "$motion" changed)
+  m_pct=$(_json_get "$motion" max_diff_pct)
+  astate=$(print -r -- "$probe_out" | sed -n 's/.*关系=\([a-z_]*\).*/\1/p')
+  if [[ "$disp" != "醒着" ]]; then
+    motion_ok=-1; note="不可判读（$disp：屏上抓不到别人的窗口，像素判据无从谈起）"
+  elif [[ "$astate" == "collapsed" ]]; then
+    motion_ok=1; note="贴边收起态 —— 像素判据不适用（合法交互态，本次跳过）"
+  elif [[ "$m_changed" == "true" ]]; then
+    motion_ok=1; note="画面在动（1.4 秒内连续帧差异 ${m_pct}% 字节）"
+  elif [[ "$m_changed" == "false" ]]; then
+    note="画面静止（最大差异 ${m_pct:-?}% 字节）—— 便宜可能是卡了"
+  else
+    # changed 为 null = 抓不到位图（权限／窗口不在屏上）。判不了就别说人家静止。
+    motion_ok=-1; note="不可判读（位图抓不到：$(print -r -- "$motion" | sed -n 's/.*"error": *"\([^"]*\)".*/\1/p')）"
+  fi
+  print "  B) 外部画面：${note}"
+  print "  自证据（补充材料，非硬判据）："
+  print -r -- "$probe_out" | sed 's/^/    | /'
+
+  loops=$(print -r -- "$probe_out" | sed -n 's/.*圈速=\([0-9.]*\)\/s.*/\1/p')
+  fps=$(print -r -- "$probe_out" | sed -n 's/.*fps=\([0-9.]*\).*/\1/p')
+  busy=0
+  if [[ -n "$loops" && -n "$fps" ]]; then
+    busy=$("$PY" -c "print(1 if float('${loops}') > 2.0 * float('${fps}') else 0)" 2>/dev/null || print 0)
+  fi
   [[ "$("$PY" -c "print(1 if float('${cpu}') < 5.0 else 0)" 2>/dev/null)" == "1" ]] && cpu_ok=1
-  if (( cpu_ok == 1 && probe_rc == 0 )); then
-    print "== 门槛通过：CPU ${cpu}% <5% 且圈速 ≈ fps =="
-    _log "gate: 通过 cpu=${cpu}% probe=0 显示=${disp}"
+
+  if (( cpu_ok == 1 && motion_ok == 1 && busy == 0 )); then
+    print "== 门槛通过：CPU ${cpu}% <5% 且画面真在动 =="
+    _log "gate: 通过 cpu=${cpu}% motion=${m_changed}(${m_pct}%) 圈速=${loops:-?} 显示=${disp}"
     return 0
   fi
-  print "== 门槛不通过 ==（CPU 达标=${cpu_ok}、自证据退出码=${probe_rc}）"
-  _log "gate: 不通过 cpu=${cpu}% probe=${probe_rc} 显示=${disp}"
+  if (( motion_ok == -1 )); then
+    print "== 门槛不可判读 ==（CPU ${cpu}% 达标=${cpu_ok}，但判据②没能验：显示状态 $disp）"
+    print "   屏幕醒着且解锁时重跑：ops/xiaoccctl gate ${secs}"
+    print "   或明确接受「只验 CPU」并留痕：ops/xiaoccctl arm ${secs} --skip-motion"
+    _log "gate: 不可判读 cpu=${cpu}% 显示=${disp}"
+    return 5
+  fi
+  print "== 门槛不通过 ==（CPU 达标=${cpu_ok}、画面在动=${motion_ok}、忙等护栏=${busy}）"
+  (( busy == 1 )) && print "  ⚠️ 圈速 ${loops}/s 远超 fps ${fps} —— 又退回忙等，别用 CPU 数字掩盖它"
+  _log "gate: 不通过 cpu=${cpu}% motion=${m_changed}(${m_pct}%) 圈速=${loops:-?} busy=${busy} 显示=${disp}"
   return 4
 }
 
 # 装回去：start → 暖机 15s（冷启动不计）→ 门禁。**不达标立刻停回去**，不留一个白烧电的进程。
+# `--skip-motion`：屏幕睡着/锁着时判据②没法判读，明确接受「只验 CPU」才放行，并写进日志留痕。
 cmd_arm() {
+  local secs=60 skip_motion=0 rc=0 a
+  for a in "$@"; do
+    case "$a" in
+      --skip-motion) skip_motion=1 ;;
+      <->) secs="$a" ;;
+    esac
+  done
   cmd_start || return 4
   print "暖机 15 秒（冷启动那段不算进入门槛）…"
   sleep 15
-  if cmd_gate "${1:-60}"; then
+  cmd_gate "$secs"; rc=$?
+  if (( rc == 0 )); then
     print "★ 门槛通过，面板留在运行状态"
     return 0
+  fi
+  if (( rc == 5 )); then
+    if (( skip_motion == 1 )); then
+      print "⚠️ 判据②不可判读，但给了 --skip-motion ⇒ 视为通过并留痕（恢复屏幕后请补跑 gate）"
+      _log "arm: --skip-motion 放行（判据②不可判读）"
+      return 0
+    fi
+    print -u2 "✗ 证据不全 ⇒ 停回去（判据②没能验）。屏幕醒着时重跑 arm，或 arm $secs --skip-motion 明确只验 CPU。"
+    cmd_stop
+    return 5
   fi
   print -u2 "✗ 门槛不达标 ⇒ 立刻停回去（不让笔记本白烧电）；修好再 arm"
   cmd_stop
@@ -438,12 +584,14 @@ case "${1:-status}" in
   status)  cmd_status ;;
   doctor)  cmd_doctor ;;
   gate)    shift; cmd_gate "${1:-60}" ;;
-  arm)     shift; cmd_arm "${1:-60}" ;;
+  arm)     shift; cmd_arm "$@" ;;
+  motion)  shift; pid="${1:-}"; [[ -n "$pid" ]] || { print -u2 "用法: xiaoccctl motion <pid>"; exit 2; }; out=$(_motion_json "$pid" 3 0.7); print -r -- "$out" | tail -1; print -r -- "$out" | head -1 ;;
   logs)    shift; cmd_logs "${1:-}" ;;
   -h|--help|help)
-    print "用法: xiaoccctl {status|start|stop|restart|doctor|gate [秒]|arm [秒]|logs [err]}"
-    print "  gate/arm：门槛 = 60s 稳态 CPU <5% 且 圈速 ≈ fps（arm 不达标会自动停回去）"
-    print "退出码: 0 正常 / 1 未运行 / 2 用法错 / 3 没装 / 4 操作或自检失败"
+    print "用法: xiaoccctl {status|start|stop|restart|doctor|gate [秒]|arm [秒] [--skip-motion]|logs [err]}"
+    print "  gate/arm：判据① 60s 稳态 CPU <5%；判据② 外部可观测的「画面真在动」（连抓窗口位图比像素）"
+    print "           屏幕睡着/锁屏时判据②不可判读 ⇒ gate 退出 5、arm 停回去（--skip-motion 才明确只验 CPU）"
+    print "退出码: 0 正常 / 1 未运行 / 2 用法错 / 3 没装 / 4 门槛不达标或操作失败 / 5 证据不全（不可判读）"
     ;;
   *)
     print -u2 "xiaoccctl: 不认得的子命令 '$1'"
