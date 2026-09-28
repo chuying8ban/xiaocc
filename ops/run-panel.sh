@@ -2,8 +2,9 @@
 # 小cc macOS 显示层启动器
 #
 # 谁启动它：LaunchAgent ~/Library/LaunchAgents/ai.hermes.xiaocc.plist
-#           （ProgramArguments = /bin/zsh <本脚本> bottom-right，RunAtLoad，
+#           （ProgramArguments = /bin/zsh <本脚本> top-right，RunAtLoad，
 #            KeepAlive.SuccessfulExit=false 只在异常退出时拉起）。
+#           不带参数运行时默认 bottom-right（本脚本的兜底，不是 plist 的值）。
 # 如何停止：launchctl bootout gui/$(id -u)/ai.hermes.xiaocc
 #           bootout 之后 launchd 不再托管，也不会自动重启。
 # 日志去向：stdout / stderr 由 plist 的 StandardOutPath / StandardErrorPath
