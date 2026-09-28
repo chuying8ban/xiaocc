@@ -4,7 +4,8 @@
 
     echo '{"state":"working","detail":"编译中","step":2,"total":5}' > ~/.xiaocc/status.json
 
-文件被删或还没创建时报告 OFFLINE，而不是报错退出。
+文件被删、读不出来、内容不合法都属于**机械故障**：直接抛异常，交给引擎隔离
+（按消息去重后写日志 + 记进 ``health()``），源自己不造 ERROR/OFFLINE 事件。
 """
 
 from __future__ import annotations
@@ -28,7 +29,14 @@ class FileSource(StatusSource):
         echo '{"state":"working","detail":"编译中","step":2,"total":5}' > ~/.xiaocc/status.json
 
     语义：**文件内容就是当前状态**，文件没被改过不代表状态过期（要收工就写
-    ``{"state":"idle"}`` 或 ``offline``）。文件还不存在时报告 OFFLINE，而不是报错退出。
+    ``{"state":"idle"}`` 或 ``offline``）。
+
+    故障分工——**机械故障不进画面**：文件不存在 / 读不出来 / 内容不合法（坏 JSON、
+    缺字段、未知状态都算）时 :meth:`poll` 直接抛异常，由引擎负责隔离：捕获 → 按消息
+    去重后 ``log.warning`` 一行 → 记进 ``health()`` → 不产生事件；没有任何源说话时才由
+    引擎兜底呈现 ``offline`` 并把原因写进 ``detail``。源自己抢着报 offline/error 会污染
+    「谁在说话」的判断。``ERROR`` 状态只留给**工作流自报**：文件内容里写着
+    ``state == "error"`` 时照常返回 ERROR 事件。
     """
 
     name = "file"
@@ -39,7 +47,6 @@ class FileSource(StatusSource):
         self.path = Path(path).expanduser()
         self._mtime: float | None = None
         self._cached: StatusEvent | None = None
-        self._warned: str | None = None
         if source_name:
             self.name = source_name
 
@@ -50,13 +57,14 @@ class FileSource(StatusSource):
     def poll(self) -> StatusEvent | None:
         try:
             stat = self.path.stat()
-        except FileNotFoundError:
+        except FileNotFoundError as exc:
             self._forget()
-            return StatusEvent(
-                source=self.label, state=State.OFFLINE, detail=f"没有这个文件：{self.path}"
-            )
-        except OSError as exc:
-            return StatusEvent(source=self.label, state=State.ERROR, detail=str(exc))
+            raise FileNotFoundError(f"没有这个文件：{self.path}") from exc
+        except OSError:
+            # 机械故障：原样抛出去（原因文字都在异常里），不自己造事件。
+            # 顺手清掉 mtime，下一轮才会重试读取，而不是拿旧缓存糊弄过去。
+            self._forget()
+            raise
 
         if self._mtime == stat.st_mtime:
             # 内容没动：把时间戳刷成现在，让「文件没被改过」不等于「状态过期」。
@@ -77,24 +85,20 @@ class FileSource(StatusSource):
 
         try:
             text = self.path.read_text(encoding="utf-8").strip()
-        except OSError as exc:
-            return StatusEvent(source=self.label, state=State.ERROR, detail=str(exc))
+        except OSError:
+            self._forget()
+            raise
         if not text:
             self._cached = None
             return None
 
         try:
             event = StatusEvent.from_json(text)
-        except (ValueError, json.JSONDecodeError) as exc:
-            # 坏数据不静默吞掉，但也不刷屏：同一原因只喊一次
-            message = f"{self.path} 内容不合法：{exc}"
-            if self._warned != message:
-                self._warned = message
-                return StatusEvent(source=self.label, state=State.ERROR, detail=message)
-            self._cached = None
-            return None
+        except ValueError as exc:
+            # 坏 JSON / 缺字段 / 未知状态都是机械故障，抛给引擎去重记日志。
+            self._forget()
+            raise ValueError(f"{self.path} 内容不合法：{exc}") from exc
 
-        self._warned = None
         # 不用文件里的 at（可能是旧时间戳，TTL 会误判过期）；内容没变时由上面的
         # 分支负责刷新时间戳，所以这里用当前时间。
         self._cached = StatusEvent(
