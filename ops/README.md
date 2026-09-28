@@ -108,10 +108,16 @@ ops/xiaoccctl motion <pid>     # 单独跑像素判据（对照/排查用）
 ops/xiaoccctl gate 30          # 判据① + 判据② 一起判，退出码：0 过 / 4 不过 / 5 判不了
 ```
 
-**屏幕睡着/锁屏时判据②不可判读**（屏上抓不到别人的窗口，`CGWindowListCreateImage` 返回 None）：
-这时 gate 退出 **5**、`arm` **停回去但不算故障**，并提示「屏幕醒着时重跑」；
+**屏幕睡着时判据②可能判不了**（屏睡时 CoreAnimation 停画、别的进程窗口也可能不在屏上）：这时 gate 退出 **5**、
+`arm` **停回去但不算故障**，并提示「屏幕醒着时重跑」。**但「锁屏」不等于判不了** —— 实测锁屏但屏亮时
+面板窗口照旧被正常抓到（1.4 秒内 22.6~28.4% 字节在变），所以 gate 是**先抓、抓到什么算什么**，
+只有「真抓不到」或「屏睡下的静止」才算不可判读（避免把屏睡停画误判成故障）。
 只有明确写 `ops/xiaoccctl arm 60 --skip-motion` 才会「只验 CPU」放行，且会在 `xiaoccctl.log` 里留痕。
-（所以人不在机器前时 `arm` 给不出完整判定 —— 这是有意为之：宁可说「证据不全」，也不要凭半个证据把面板装上桌面。）
+（判不了时宁可说「证据不全」、也不凭半个证据把面板装上桌面 —— 但别把「锁屏」当成判不了，见上。）
+
+**已在部署路径上过闸（2026-09-29 03:1x）**：`arm 60` → `A) CPU 3.8% <5%` / `B) 画面在动（1.4 秒内 22.6% 字节在变）` /
+自证据 `fps=15 圈速=13.9/s 关系=anchor 在锚点=True` ⇒ 通过，面板留在运行状态，`doctor` 12 项全绿。
+帧率改由 plist 第 3 个参数给（`run-panel.sh <停靠点> <帧率>`，当前 `top-right 15`）：15 帧 3.8~4.9%、30 帧 9.0%、点阵化前 16.8%，圈速与配置自洽（不是被节流）。
 
 判据②的**正对照**是 `ops/motion_positive_control.py`（自开一个 30fps 自绘窗口，必定在动），
 测完用 `ops/xiaoccctl motion <它的 pid>` 必须得到 `changed=true`；**它要求屏幕醒着且未锁屏**，
@@ -143,3 +149,20 @@ A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 过�
 
 `doctor` 的第 ⑩ 项会读锚点文件跟实测窗口矩形对一下（Δ≤6px 算一致）并打出最近一行位移留痕 ——
 **只提示、不判失败**：拖拽搬家、贴边收起都是合法态，别把交互误报成故障。
+
+## 7. CPU 看门狗（运行时保护，@lead 定：优先级高于门禁美化）
+
+门禁 `arm` 是**一次性**部署检查，而且判据②在屏幕睡着时判不了；「人不在机器前、面板偷偷烧一整天」只能靠周期性采样兜底。
+
+* `ai.hermes.xiaocc.watchdog`（`StartInterval=300`，常驻加载）+ `ops/xiaocc_watchdog.sh`：
+  每 5 分钟量一次面板的**稳态** CPU（`ps -o time=` 两次做差，默认 10s 窗口，**与屏幕状态无关**），
+  **连续 3 次 > 8%** ⇒ `xiaoccctl stop` + `watchdog.log` + **`watchdog-stop.json` 留痕**（含最后一次 CPU、阈值、`rearm` 提示）。
+  面板没在跑 ⇒ 连续计数清零、静默退出（脚本自己几秒就结束，不常驻）。**它不会自动把面板装回来**，修好要人 `arm`。
+* 文件：`~/Library/Logs/xiaocc/watchdog.log`、`watchdog.json`（当前连续计数 + 最近 9 次采样）、`watchdog-stop.json`（只在真动手停时写）。
+* 停用：`launchctl bootout gui/$(id -u)/ai.hermes.xiaocc.watchdog`。
+* **怎么测（别等 15 分钟）**：`XIAOCC_WD_THRESHOLD=3 XIAOCC_WD_STREAK=1 XIAOCC_WD_WINDOW=4 ops/xiaocc_watchdog.sh`
+  —— 实测该组合在面板 4.0% 时立即停掉面板并写出留痕文件；部署默认值（8%/3 次/10s）不会被 3~9% 的常态触发。
+
+**测量前务必确认只有一个面板进程**：`pgrep -f "xiaocc run"` 应为 1。
+实测踩到过三次叠在同一位置的实例（两个是 `--linger 400` 的 A/B 臂、ppid=1 的残留：owner 脚本退出后它们还在）——
+残留会同时烧 CPU、盖住窗口、污染任何「按 pid 从外面量」的结论。跑 A/B 的脚本要在自己的 `finally` 里清掉自己的臂。

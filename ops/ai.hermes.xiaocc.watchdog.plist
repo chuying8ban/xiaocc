@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ai.hermes.xiaocc.watchdog</string>
+
+	<!-- 每 5 分钟跑一次（脚本自己几秒就结束，不常驻）；面板没在跑时它什么都不做 -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>/Users/a29285/ChenC/项目/xiaocc/ops/xiaocc_watchdog.sh</string>
+	</array>
+
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>60</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+
+	<key>StandardOutPath</key>
+	<string>/Users/a29285/Library/Logs/xiaocc/watchdog.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/a29285/Library/Logs/xiaocc/watchdog.err.log</string>
+</dict>
+</plist>

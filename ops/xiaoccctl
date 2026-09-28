@@ -491,9 +491,6 @@ cmd_gate() {
   fi
   disp="$(_display_state)"
   print "== 门槛测量：${secs}s 稳态 CPU + 外部画面判据 / 显示状态：${disp} =="
-  if [[ "$disp" != "醒着" ]]; then
-    print "⚠️ 显示状态不是「醒着」⇒ 判据②（画面真在动）本次**不可判读**（不算过、也不算故障），CPU 数字也偏低不可比。"
-  fi
   cpu=$(_cpu_pct "$pid" "$secs")
   print "  A) CPU：${cpu}%（门槛 <5%）"
 
@@ -502,14 +499,15 @@ cmd_gate() {
   m_changed=$(_json_get "$motion" changed)
   m_pct=$(_json_get "$motion" max_diff_pct)
   astate=$(print -r -- "$probe_out" | sed -n 's/.*关系=\([a-z_]*\).*/\1/p')
-  if [[ "$disp" != "醒着" ]]; then
-    motion_ok=-1; note="不可判读（$disp：屏上抓不到别人的窗口，像素判据无从谈起）"
-  elif [[ "$astate" == "collapsed" ]]; then
+  if [[ "$astate" == "collapsed" ]]; then
     motion_ok=1; note="贴边收起态 —— 像素判据不适用（合法交互态，本次跳过）"
   elif [[ "$m_changed" == "true" ]]; then
-    motion_ok=1; note="画面在动（1.4 秒内连续帧差异 ${m_pct}% 字节）"
-  elif [[ "$m_changed" == "false" ]]; then
+    motion_ok=1; note="画面在动（1.4 秒内连续帧差异 ${m_pct}% 字节；显示状态=$disp）"
+  elif [[ "$m_changed" == "false" && "$disp" == "醒着" ]]; then
     note="画面静止（最大差异 ${m_pct:-?}% 字节）—— 便宜可能是卡了"
+  elif [[ "$m_changed" == "false" ]]; then
+    # 屏幕睡着时 CoreAnimation 停画，此时抓到的「静止」不算证据（实测：锁屏但屏亮时能抓到、且确实在动）
+    motion_ok=-1; note="不可判读（抓到的是静止画面，但显示状态=$disp —— 屏睡停画属正常，不能据此判故障）"
   else
     # changed 为 null = 抓不到位图（权限／窗口不在屏上）。判不了就别说人家静止。
     motion_ok=-1; note="不可判读（位图抓不到：$(print -r -- "$motion" | sed -n 's/.*"error": *"\([^"]*\)".*/\1/p')）"
@@ -533,7 +531,7 @@ cmd_gate() {
   fi
   if (( motion_ok == -1 )); then
     print "== 门槛不可判读 ==（CPU ${cpu}% 达标=${cpu_ok}，但判据②没能验：显示状态 $disp）"
-    print "   屏幕醒着且解锁时重跑：ops/xiaoccctl gate ${secs}"
+    print "   显示状态不是「醒着」时像素判据可能判不了（屏睡停画）；屏幕醒着且解锁时重跑：ops/xiaoccctl gate ${secs}"
     print "   或明确接受「只验 CPU」并留痕：ops/xiaoccctl arm ${secs} --skip-motion"
     _log "gate: 不可判读 cpu=${cpu}% 显示=${disp}"
     return 5
