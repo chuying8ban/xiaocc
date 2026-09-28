@@ -52,7 +52,8 @@ where = ["src"]
 include = ["xiaocc*"]
 
 [tool.setuptools.package-data]
-xiaocc = ["characters/*/*.json"]
+# 角色包 = 清单 + 每状态的矢量图；少一行，装到别人机器上就是一只没有脸的小cc
+xiaocc = ["characters/*/*.json", "characters/*/assets/*.svg"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="132" height="140" viewBox="0 0 132 140">
+  <defs>
+    <linearGradient id="shell" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/>
+      <stop offset="0.5" stop-color="#EEF1F7"/>
+      <stop offset="1" stop-color="#D3DAE8"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A3242"/>
+      <stop offset="1" stop-color="#171C26"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#FFC24B" stop-opacity="0.5"/>
+      <stop offset="1" stop-color="#FFC24B" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <g transform="translate(66 80) scale(0.94)">
+    <circle r="58" fill="url(#glow)"/>
+    <ellipse cy="54" rx="42" ry="7" fill="#26303F" opacity="0.08"/>
+    <path d="M-38 -4 q -16 6 -18 20" fill="none" stroke="#D3DAE8" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="-58" cy="18" r="7" fill="#EEF1F7" stroke="#CDD5E4" stroke-width="1.4"/>
+    <path d="M38 -6 q 18 -12 20 -34" fill="none" stroke="#D3DAE8" stroke-width="8" stroke-linecap="round"/>
+    <circle cx="58" cy="-42" r="7" fill="#EEF1F7" stroke="#CDD5E4" stroke-width="1.4"/>
+    <g transform="translate(50 -56) rotate(-28)">
+      <rect x="-3" y="-5" width="6" height="26" rx="3" fill="#B9C3D6"/>
+      <path d="M-7 -18 a 9 9 0 1 0 14 0 l -3 6 h -8 z" fill="#B9C3D6"/>
+    </g>
+    <rect x="-38" y="-44" width="76" height="88" rx="34" fill="url(#shell)" stroke="#C9D2E2" stroke-width="1.4"/>
+    <rect x="-28" y="-26" width="56" height="34" rx="16" fill="url(#visor)"/>
+    <rect x="-28" y="-26" width="56" height="34" rx="16" fill="none" stroke="#FFC24B" stroke-width="1.2" opacity="0.45"/>
+    <path d="M-15 -9 l 9 6 l -9 6" fill="none" stroke="#FFC24B" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M2 -9 l 9 6 l -9 6" fill="none" stroke="#FFC24B" stroke-width="3.6" stroke-linecap="round" stroke-linejoin="round"/>
+    <rect x="-22" y="22" width="44" height="7" rx="3.5" fill="#FFC24B"/>
+    <path d="M0 -44 v -12" fill="none" stroke="#C9D2E2" stroke-width="2.4" stroke-linecap="round"/>
+    <circle cy="-59" r="5.5" fill="#FFC24B"/>
+    <path d="M-52 -34 l -9 -8" fill="none" stroke="#FFC24B" stroke-width="2.4" stroke-linecap="round" opacity="0.8"/>
+    <path d="M-55 -14 l -9 -3" fill="none" stroke="#FFC24B" stroke-width="2.4" stroke-linecap="round" opacity="0.8"/>
+  </g>
+</svg>

@@ -4,14 +4,14 @@
   "version": "0.1.0",
   "author": "ChenC",
   "license": "MIT",
-  "canvas": { "width": 220, "height": 240 },
+  "canvas": { "width": 132, "height": 140 },
   "default_scale": 1.0,
   "palette": {
-    "body": "#F4EFE6",
-    "shade": "#DCD3C4",
-    "ink": "#2B2E3A",
+    "body": "#EEF1F7",
+    "shade": "#C9D2E2",
+    "ink": "#26303F",
     "accent": "#6FD3E8",
-    "glow": "#B7E9F5"
+    "glow": "#6FD3E8"
   },
   "states": {
     "idle": {
@@ -50,5 +50,13 @@
       "caption": "离线"
     }
   },
-  "assets": {}
+  "assets": {
+    "idle": "assets/idle.svg",
+    "thinking": "assets/thinking.svg",
+    "working": "assets/working.svg",
+    "waiting": "assets/waiting.svg",
+    "done": "assets/done.svg",
+    "error": "assets/error.svg",
+    "offline": "assets/offline.svg"
+  }
 }
