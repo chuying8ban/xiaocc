@@ -2,15 +2,20 @@
 
 关键点：**用临时 sqlite 复刻 Hermes 的表结构**，不碰用户真实的 state.db。
 这样 CI（Linux/Windows）也能验，而且能精确构造「忙 / 刚干完 / 空闲 / 没装」四种情形。
+
+``_project_name`` 是纯函数，不碰数据库，直接参数化验优先级即可。
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
+from pathlib import Path
+
+import pytest
 
 from xiaocc.protocol import State
-from xiaocc.sources.hermes import HermesSource, find_state_dbs
+from xiaocc.sources.hermes import HermesSource, _project_name, find_state_dbs
 
 SCHEMA = """
 CREATE TABLE sessions (
@@ -109,3 +114,49 @@ def test_find_state_dbs_sorted_newest_first(tmp_path):
     found = find_state_dbs(home)
     assert len(found) == 3
     assert all(p.name == "state.db" for p in found)
+
+
+# —— 项目名挑选（字幕里 · 左边那个词）——————————————————————————————
+
+#: 显式传 home=，让「主目录本身不算项目名」这条在 CI 的任意机器上都成立，
+#: 也保证测试不去碰真实的 ~/.hermes。
+_FAKE_HOME = "/Users/alice"
+
+#: Hermes 自动生成的群聊标题：`rmukls1dr`、`tmulchpfa` 都是连续 9 位 [a-z0-9]，纯机器哈希
+_GROUP_TITLE = "Group: rmukls1dr-u871o · tmulchpfa-yu7jb"
+
+
+@pytest.mark.parametrize(
+    "cwd,title,profile_name,expected",
+    [
+        ("/Users/alice/ChenC/xiaocc", _GROUP_TITLE, "lead", "xiaocc"),  # 哈希标题让位给 cwd
+        (None, "桌宠", "lead", "桌宠"),  # 人话标题必须保留，不能一刀切禁掉 title
+        ("", "桌宠", None, "桌宠"),  # 空串 cwd 等于「没有 cwd」
+        ("/Users/alice", "桌宠", "lead", "桌宠"),  # 主目录本身：不许把用户名挂桌面上
+        ("/Users/alice", _GROUP_TITLE, "lead", "lead"),  # 主目录 + 哈希标题 → 退到 profile 名
+        ("/", "桌宠", "lead", "桌宠"),  # 根目录同样不携带项目信息
+        ("/", _GROUP_TITLE, None, ""),  # 三条线索全废 → 空串，上层就不拼 ·
+        (None, None, None, ""),  # 同上：空串而不是 None
+        (None, "rmukls1d", "lead", "lead"),  # 连续 8 位就算哈希（阈值含 8）
+        (None, "rmukls1", "lead", "rmukls1"),  # 7 位还是人话，得留着
+        # 边界：cwd 结尾带斜杠（宿主写库时常见），basename 不能被斜杠吃成空串
+        ("/Users/alice/ChenC/xiaocc/", "桌宠", "lead", "xiaocc"),
+    ],
+)
+def test_project_name_priority(cwd, title, profile_name, expected):
+    """优先级：cwd basename → 人话 title → profile 名 → 空串。"""
+    assert _project_name(cwd, title, profile_name, home=_FAKE_HOME) == expected
+
+
+def test_project_name_expands_tilde_and_default_home():
+    """边界：cwd 带 ``~`` 要先 expanduser，且默认 home 走 ``Path.home()``。
+
+    为什么单开一个函数、不塞进上面的 parametrize：``~/ChenC/xiaocc`` 即使忘了展开，
+    basename 也恰好是 ``xiaocc``，测不出差别；真正会露馅的是光秃秃一个 ``~`` ——
+    不展开就会被当成 basename 挂上桌面（顺带把用户名漏出去），展开了才知道它
+    就是主目录、必须跳过。这条只能对着机器真实主目录验，所以用 ``Path.home()``。
+    """
+    home = Path.home()
+    assert _project_name(home, "桌宠", "lead") == "桌宠"  # 不传 home= 也认得真实主目录
+    assert _project_name("~", "桌宠", "lead", home=home) == "桌宠"  # 展开后 = 主目录 → 跳过
+    assert _project_name(home / "ChenC" / "xiaocc", "桌宠", "lead", home=home) == "xiaocc"

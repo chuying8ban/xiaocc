@@ -16,7 +16,9 @@
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
+import tempfile
 import time
 from pathlib import Path
 
@@ -27,6 +29,56 @@ __all__ = ["HermesSource", "find_state_dbs"]
 
 #: 最后一条消息多久之内算「刚干完」（展示 done 动作然后自己回 idle）
 _DONE_WINDOW = 20.0
+
+#: 标题里出现这么长的一串小写字母/数字，就认定是机器生成的会话标识（哈希）
+_HASH_RUN = re.compile(r"[a-z0-9]{8,}")
+
+#: 系统临时目录：和主目录/根目录一样，不说明「在哪个项目里干活」
+_TEMP_DIRS = ("/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp")
+
+
+def _project_name(
+    cwd: str | os.PathLike[str] | None,
+    title: str | None,
+    profile_name: str | None,
+    *,
+    home: str | os.PathLike[str] | None = None,
+) -> str:
+    """给桌宠字幕挑一个「人类看得懂」的项目名，按优先级取第一个可用的。
+
+    优先级（主管定死的契约）：
+
+    1. ``cwd`` 的 basename —— 会话的工作目录最能说明「在哪个项目里干活」。
+       取 basename 前先 ``Path(cwd).expanduser()`` 规整；``cwd`` 为空、
+       或规整后等于下面这些「不携带项目信息」的目录时跳过：
+       用户主目录本身（``/Users/xxx``、``/home/xxx``）、根目录 ``/``、
+       以及系统临时目录（``/tmp`` 等，会话挂在临时目录里说明它不属于任何项目）。
+    2. ``title`` —— 但只有「人话」标题才用。
+       判定规则：标题里只要出现**连续 8 个及以上**的 ``[a-z0-9]``
+       （小写字母或数字，例如 ``rmukls1dr``、``1a2b3c4d5e``），
+       就认为这是 Hermes 自动生成的群聊/会话标识（哈希串），
+       **整条标题作废**，继续往下找。
+       为什么不要哈希标题：字幕是直接挂在桌面上的，一串
+       ``Group: rmukls1dr-u871o · tmulchpfa-yu7jb`` 对人没有任何意义，
+       只会把桌面弄脏；而人类自己起的标题（``桌宠``、``cupk 论坛``）
+       恰好不含这种长串，必须保留。
+    3. ``profile_name`` —— 非空就用它，表达「这是哪个 profile 在干活」。
+    4. 都没有 → 返回 ``""``，让上层（``protocol.py`` 拼 ``·`` 分隔符的地方）
+       自然不显示分隔符，而不是挂一个空的分隔符在字幕上。
+    """
+    if cwd:
+        directory = Path(cwd).expanduser()
+        home_dir = Path(home).expanduser() if home else Path.home()
+        boring = {home_dir, Path(directory.anchor), Path(tempfile.gettempdir())}
+        boring.update(Path(item) for item in _TEMP_DIRS)
+        if directory.name and directory not in boring:
+            return directory.name
+
+    text = (title or "").strip()
+    if text and not _HASH_RUN.search(text):
+        return text
+
+    return (profile_name or "").strip()
 
 
 def find_state_dbs(home: str | os.PathLike[str] | None = None) -> list[Path]:
@@ -145,8 +197,7 @@ class HermesSource(StatusSource):
         if row is None:
             return StatusEvent(source=self.label, state=State.IDLE, detail="Hermes 空闲")
 
-        project = (row["title"] or row["cwd"] or "").strip()
-        project = Path(project).name if "/" in project else project
+        project = _project_name(row["cwd"], row["title"], row["profile_name"])
         last_ts = row["timestamp"] or row["last_activity_at"] or 0.0
         age = max(0.0, now - float(last_ts))
         stage = (row["last_activity_description"] or "").strip()
