@@ -27,7 +27,14 @@ from .base import StatusSource
 
 __all__ = ["HermesSource", "find_state_dbs"]
 
-#: 最后一条消息多久之内算「刚干完」（展示 done 动作然后自己回 idle）
+#: 最后一条消息多久之内算「刚干完」（展示 done 动作然后自己回 idle）。
+#: 注意：这是**消息年龄窗口**，不是 TTL —— 它只决定「末条消息多旧就不再算 done」，
+#: 事件能保鲜多久由 ``protocol.STATE_TTL[State.DONE]`` 说了算，本源无权也无须过问。
+#: 因此下面那条 done 事件的 ``at`` 必须写「此刻」（``now``），不能写末条消息时间：
+#: ``at`` 的语义是「这条汇报有多新鲜」，而本源是在**此刻**主动汇报状态的。
+#: 一旦拿消息时间当 ``at``，本窗口（20s）又比 ``STATE_TTL[State.DONE]``（12s）宽，
+#: 消息年龄落在 12~20s 的 done 事件就会在报出去的路上被 ``pick()`` 判为过期整条丢弃，
+#: 引擎只能兜底合成 offline —— 桌面上会莫名闪一下「没有任何状态源在线」。
 _DONE_WINDOW = 20.0
 
 #: 标题里出现这么长的一串小写字母/数字，就认定是机器生成的会话标识（哈希）
@@ -229,7 +236,7 @@ class HermesSource(StatusSource):
                 state=State.DONE,
                 detail=stage or "这轮做完了",
                 project=project,
-                at=last_ts,
+                at=now,
             )
         if float(last_ts) and (now - float(last_ts)) <= self.stale_after:
             return StatusEvent(

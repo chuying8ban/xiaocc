@@ -4,17 +4,24 @@
 这样 CI（Linux/Windows）也能验，而且能精确构造「忙 / 刚干完 / 空闲 / 没装」四种情形。
 
 ``_project_name`` 是纯函数，不碰数据库，直接参数化验优先级即可。
+
+文件后半还有一组「TTL 护栏 + done 窗口回归」用例：那里不 mock 引擎，
+而是拿真 ``HermesSource`` 喂真 ``Engine``（含真角色包），
+验的是「源只要开口，事件就一定够新鲜走到屏幕上」。
 """
 
 from __future__ import annotations
 
 import sqlite3
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
-from xiaocc.protocol import State
+from xiaocc.characters import load_character
+from xiaocc.engine import Engine
+from xiaocc.protocol import STATE_TTL, State, StatusEvent, pick
 from xiaocc.sources.hermes import HermesSource, _project_name, find_state_dbs
 
 SCHEMA = """
@@ -114,6 +121,152 @@ def test_find_state_dbs_sorted_newest_first(tmp_path):
     found = find_state_dbs(home)
     assert len(found) == 3
     assert all(p.name == "state.db" for p in found)
+
+
+# —— TTL 护栏：源只要开口，事件就必须够新鲜走到屏幕上 ——————————————————————
+#
+# 为什么加这一组（真 bug，不是假想）：done 事件一度写成 ``at=last_ts``（末条消息时间），
+# 而 ``hermes._DONE_WINDOW = 20.0`` 比协议里 ``STATE_TTL[State.DONE] = 12.0`` 宽 8 秒 ——
+# 末条消息年龄落在 12~20s 时，源老实报 done，``pick()`` 却按 TTL 判它过期整条丢弃，
+# 引擎只好兜底合成 offline，桌面上莫名闪一句「没有任何状态源在线」。
+# 修法是 ``at=now``（``at`` 的语义是「这条汇报有多新鲜」，源是在**此刻**汇报的）。
+#
+# 但别只钉住 12 和 20 这两个数字：窗口和 TTL 都是会被人调的业务参数，
+# 盯着「窗口 ≤ TTL」这种具体比较，下次一改数值就又漏。真正的不变量是：
+#   **任何源发出的任何事件都满足 ``event.at >= now - STATE_TTL[event.state]``**，
+# 它等价于「任何落在 ``now - TTL`` 之前的 ``at``，事件必被 ``pick()`` 丢掉」。
+# 下面这个辅助函数就是这句契约，对每个状态、每个年龄段都成立，换任何新源都能直接复用。
+
+
+def _assert_event_is_fresh(event: StatusEvent, now: float) -> None:
+    """通用护栏：这条事件在 ``now`` 这一刻必须仍然新鲜，否则它根本走不到屏幕。
+
+    顺手把「等价于」那半句也验掉：把同一状态的事件往前挪到 ``now - TTL`` 之前，
+    ``pick()`` 必须丢掉它。这样才知道护栏是**真的在承重**（TTL 确实在被执行），
+    而不是一句永远为真的空断言。
+    """
+    assert not event.is_stale(now), f"源刚报出来就已过期，屏幕上只会看到假的 offline：{event.summary()}"
+    ttl = STATE_TTL[event.state]
+    if ttl is None:
+        return  # idle/offline 按协议不过期（否则桌宠会自己消失），护栏天然满足
+    assert event.at >= now - ttl, f"{event.state} 的 at 早于 now-TTL({ttl}s)：{event.summary()}"
+    assert pick([event], now) is event, "新鲜事件不该被 pick() 丢掉"
+    expired = replace(event, at=now - ttl - 1.0)  # 同状态、只把 at 挪过界
+    assert expired.is_stale(now)
+    assert pick([expired], now) is None, "越过 now-TTL 的事件必须被 pick() 丢掉，护栏才有意义"
+
+
+#: 末条消息年龄扫描点。13s/18s 是专门挑的：> ``STATE_TTL[DONE]``(12s) 又 <= ``_DONE_WINDOW``(20s)，
+#: 正好落在那条 8 秒的缝里；20s 是窗口边界；30s/200s 是窗口外（idle 那条路）。
+_AGES = [5.0, 13.0, 18.0, 20.0, 30.0, 200.0]
+
+
+@pytest.mark.parametrize("age", _AGES)
+def test_event_always_fresh_whatever_the_message_age(tmp_path, age):
+    """逐年龄段跑一遍护栏：源报的每条事件都新鲜，屏幕演的就是源说的那个状态。
+
+    这里**不 mock 引擎**：单源时 ``pick()`` 选中的就是源那条事件，
+    于是「屏幕 == 源」是一条可以直接断言的性质；一旦哪天某个状态的 ``at`` 又被写成
+    过去的时间，这条会先在屏幕上露馅（变成 offline），而不是只在日志里悄悄丢事件。
+    """
+    _make_db(tmp_path, lease=False, last_role="assistant", finish_reason="stop", age=age).close()
+    source = HermesSource(db=tmp_path / "state.db")
+
+    event = source.poll()
+    assert event is not None, "hermes 源任何时候都该给个说法，不该沉默"
+    _assert_event_is_fresh(event, time.time())
+
+    frame = Engine([source], load_character()).tick()
+    assert frame is not None
+    assert frame.state is event.state, f"屏幕该演 {event.state}，实际演了 {frame.state}"
+    assert frame.state is not State.OFFLINE, "源还在说话，屏幕就不许报「没有任何状态源在线」"
+    _assert_event_is_fresh(frame.event, time.time())
+
+
+def test_guardrail_covers_every_state_the_source_can_report(tmp_path):
+    """护栏覆盖**全部分支**：干活/思考/刚干完/空闲/库坏了/没装。
+
+    为什么不只测 done：出过 bug 的是 done，但 ``at`` 是每个分支各自写的，
+    以后谁改了 working 或 error 的 ``at``，同样会让桌宠闪 offline。
+    """
+    scenarios = {
+        "working": {"lease": True, "last_role": "tool", "tool_name": "write_file"},
+        "thinking": {"lease": True, "last_role": "user"},
+        "done": {"lease": False, "last_role": "assistant", "finish_reason": "stop", "age": 15.0},
+        "idle": {"lease": False, "last_role": "assistant", "finish_reason": "stop", "age": 3600.0},
+    }
+    events = []
+    for name, kwargs in scenarios.items():
+        folder = tmp_path / name
+        folder.mkdir()
+        _make_db(folder, **kwargs).close()
+        event = HermesSource(db=folder / "state.db").poll()
+        assert event is not None
+        events.append(event)
+
+    broken = tmp_path / "broken"
+    broken.mkdir()
+    (broken / "state.db").write_text("这不是 sqlite", encoding="utf-8")
+    for db in (broken / "state.db", tmp_path / "nope.db"):  # 库坏了 / 根本没装
+        event = HermesSource(db=db).poll()
+        assert event is not None
+        events.append(event)
+
+    states = {event.state for event in events}
+    assert {State.WORKING, State.THINKING, State.DONE, State.IDLE, State.OFFLINE} <= states
+    now = time.time()
+    for event in events:
+        _assert_event_is_fresh(event, now)
+
+
+# —— 回归：done 窗口那 8 秒缝里，屏幕不许闪 offline ——————————————————————————
+
+
+def test_done_at_13s_reaches_screen_not_offline(tmp_path):
+    """钉住这次的 bug：末条消息 13 秒前 → 源报 done，屏幕也得是 done。
+
+    13s 这个点是专门挑的：它 > ``STATE_TTL[State.DONE]``(12s) 却 <= ``_DONE_WINDOW``(20s)，
+    正好落在当初漏掉的那段缝里。那时 done 事件写的是 ``at=last_ts``，
+    于是 ``pick()`` 按 TTL 判它过期、整条丢弃，引擎兜底合成 offline，
+    桌面上闪一句「没有任何状态源在线」——用户看到的是「小cc 说它没连上任何源」。
+    """
+    _make_db(tmp_path, lease=False, last_role="assistant", finish_reason="stop", age=13.0).close()
+    source = HermesSource(db=tmp_path / "state.db")
+
+    event = source.poll()
+    assert event is not None and event.state is State.DONE
+    now = time.time()
+    # ``at`` 必须是「此刻汇报」而不是末条消息时间：差值应当接近 0，绝不是一整个 13 秒
+    assert abs(now - event.at) < 1.0, f"done 的 at 应是此刻，实际差了 {now - event.at:.3f}s"
+    assert not event.is_stale(now), "13s 的消息年龄不该让 done 事件过期（TTL 管的是 at）"
+    assert pick([event], now) is event
+
+    frame = Engine([source], load_character()).tick()
+    assert frame is not None
+    assert frame.state is State.DONE, f"屏幕该演 done，实际是 {frame.state}"
+    assert "没有任何状态源在线" not in frame.event.detail
+
+
+def test_done_window_boundary_at_20s_falls_back_to_idle(tmp_path):
+    """窗口边界：末条消息满 20 秒就不再算 done，源改报 idle —— 而 idle 同样不许过期。
+
+    为什么要留这条：``_DONE_WINDOW`` 是源自己的业务参数，调大调小都可以，
+    前提是「done 演完的那一刻」交给 idle 时事件依旧新鲜（``at=now``，
+    且 idle 的 TTL 是 ``None``），桌面才不会在收尾瞬间闪一次 offline。
+    """
+    _make_db(tmp_path, lease=False, last_role="assistant", finish_reason="stop", age=20.0).close()
+    # 建库和 poll 之间隔一小会儿：保证源看到的年龄**严格**大于窗口。
+    # 否则在时钟刻度较粗的机器上（Windows CI）可能读到同一个刻度，
+    # 20.0 <= 20.0 就被判成 done，这条边界用例反而成了随机失败。
+    time.sleep(0.02)
+    source = HermesSource(db=tmp_path / "state.db")
+
+    event = source.poll()
+    assert event is not None and event.state is State.IDLE
+    _assert_event_is_fresh(event, time.time())
+
+    frame = Engine([source], load_character()).tick()
+    assert frame is not None and frame.state is State.IDLE
 
 
 # —— 项目名挑选（字幕里 · 左边那个词）——————————————————————————————
