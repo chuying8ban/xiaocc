@@ -149,6 +149,7 @@ def __init__(self, spec: str = "25") -> None:      # --source 'pomodoro:25,bg'
 | 只有 7 个状态 | `idle/thinking/working/waiting/done/error/offline`；给别的值直接报错，不猜 |
 | 进度只来自真实数字 | 没给 `step`/`total` 就不显示百分比，别自己造 |
 | TTL 和优先级不归你管 | 由 `protocol.STATE_TTL` / `STATE_PRIORITY` 决定（`working` 45s、`error`/`thinking` 90s、`idle`/`offline` 不过期） |
+| `at` 要么是 `now`，要么够新 | 早于 `now - STATE_TTL[state]` 的事件会被直接丢掉；跨进程/跨语言写 payload 时注意单位是**秒**（毫秒会被 `from_json` 拒绝） |
 | `interval` 决定节拍 | 引擎取**所有源里最小的**，下限 0.25s；`file` 0.75s、`command` 2s |
 | 抛异常会被隔离 | 引擎记日志（`xiaocc -v`）+ `Engine.health()`，其它源照常上屏 |
 | 机械故障不进画面 | 文件读不了 / 命令不存在、超时、退出码非 0 / stdout 不是合法 JSON → 只进日志与 `health()`；屏幕上没有别的源说话时才以 `offline` 呈现，原因在 `detail` |
@@ -184,7 +185,8 @@ xiaocc run --source my_src -b terminal --once   # 只跑一帧，适合脚本和
 | --- | --- | --- |
 | entry point 组名写错（`xiaocc.source`、`xiaocc_sources`） | 装上了、`xiaocc sources` 里却没有，也不报错 | 照抄 `xiaocc.sources`；装完先跑 `xiaocc sources` 确认 |
 | `poll()` 里干重活（网络请求、扫目录） | 节拍被这一个源拖慢，整只桌宠卡住 | `poll()` 只读「早就准备好的值」，重活放后台线程，或干脆用 `file:` + 定时脚本 |
-| 用了数据里的旧时间戳做 `at` | TTL 误判成过期，状态刚报就退档 | 用当前时间构造事件（`FileSource` 就为此显式把 `at` 换成 `time.time()`） |
+| 用了数据里的旧时间戳做 `at` | 事件刚报出去就被 `pick()` 丢掉，屏幕上什么都不剩。**本项目自己踩过**：hermes 的 done 一度用「末条消息时间」，而它愿意报 done 的窗口（20s）比 done 的 TTL（12s）宽，于是每轮任务结束后的 12~20 秒，桌面显示 `offline` | **要么用 `at=now` 报，要么保证给定的年龄 ≤ 该状态的 TTL**：任何落在 `now - TTL` 之前的 `at`，事件必被丢掉。这条不变量有测试守着（`tests/test_hermes_source.py` 的 `_assert_event_is_fresh`，双向验：新鲜的要留下、过界的必须被丢） |
+| payload 里的 `at` 写成毫秒 | 差一千倍：一个 `error` 会**永远挂在屏幕上**，`STATE_TTL[error]=90s` 形同不存在，画面卡住不动 | `StatusEvent.from_json` 当场拒绝：必须是有限的 JSON 数字，且不得超前 `now` 超过 60 秒（容时钟偏差），报错里直接问「是不是写成毫秒了？」 |
 | 在 shell 里写 `command:` 的 JSON | 双引号被 shell 吃掉 → 输出不是合法 JSON，算机械故障，只在 `xiaocc -v` 的日志里看得到 | 把输出逻辑写成脚本文件，别在命令行里跟引号搏斗 |
 | 坏源每轮刷日志 | 日志被刷屏 | 同一个故障只写一条：由引擎按消息去重（`Engine.tick()`），源里不用自己记「上次报过没」 |
 | 一个永远坏掉的源挂在命令行上 | 它的机械故障只在日志里，画面不受影响 | 想让人看见就在 payload 里报 `state=error`（这是唯一的抢镜方式） |
