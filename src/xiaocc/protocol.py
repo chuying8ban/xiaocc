@@ -18,6 +18,7 @@
 from __future__ import annotations
 
 import json
+import math
 import time
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
@@ -150,10 +151,25 @@ class StatusEvent:
         except ValueError as exc:
             valid = ", ".join(s.value for s in State)
             raise ValueError(f"未知状态 {data.get('state')!r}，合法取值：{valid}") from exc
+        # ``at`` 的护栏：age()/TTL 全靠它，单位写错（毫秒）会让 age 算成 0 甚至负数，
+        # 事件就**永不过期**——一个 error 会永远挂在桌面上，STATE_TTL 形同不存在。
+        # 只认「秒级、有限、不比现在超前 60 秒以上」的数字；60 秒是给机器间时钟偏差留的余量。
+        raw_at = data.get("at") or time.time()
+        if isinstance(raw_at, bool) or not isinstance(raw_at, (int, float)):
+            # 同上：源侧把 ValueError 统一归为「输出不合法」，所以不改抛 TypeError
+            raise ValueError(f"at 必须是秒级时间戳（JSON 数字），收到 {raw_at!r}")  # noqa: TRY004
+        if not math.isfinite(raw_at):
+            raise ValueError(f"at 必须是秒级时间戳（有限的 JSON 数字），收到 {raw_at!r}")
+        ahead = float(raw_at) - time.time()
+        if ahead > 60.0:
+            raise ValueError(
+                f"at 超前当前时间 {ahead:.0f} 秒（最多容 60 秒时钟偏差）；"
+                f"at 必须是秒级时间戳，收到 {raw_at!r}——是不是写成毫秒了？"
+            )
         return cls(
             source=str(data.get("source") or "unknown"),
             state=state,
-            at=float(data.get("at") or time.time()),
+            at=float(raw_at),
             detail=str(data.get("detail") or ""),
             project=str(data.get("project") or ""),
             step=data.get("step"),
