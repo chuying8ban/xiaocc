@@ -33,6 +33,12 @@ _DONE_WINDOW = 20.0
 #: 标题里出现这么长的一串小写字母/数字，就认定是机器生成的会话标识（哈希）
 _HASH_RUN = re.compile(r"[a-z0-9]{8,}")
 
+#: 群聊会话的标题前缀（Hermes 写成 ``Group: <会话标识>``）：大小写不敏感、容忍前后空白
+_GROUP_TITLE = re.compile(r"^\s*group\s*:", re.IGNORECASE)
+
+#: 群聊在字幕上占的那个词：群聊本身就是答案，不再往后回落
+_GROUP_LABEL = "群聊"
+
 #: 系统临时目录：和主目录/根目录一样，不说明「在哪个项目里干活」
 _TEMP_DIRS = ("/tmp", "/private/tmp", "/var/tmp", "/private/var/tmp")
 
@@ -53,18 +59,24 @@ def _project_name(
        或规整后等于下面这些「不携带项目信息」的目录时跳过：
        用户主目录本身（``/Users/xxx``、``/home/xxx``）、根目录 ``/``、
        以及系统临时目录（``/tmp`` 等，会话挂在临时目录里说明它不属于任何项目）。
-    2. ``title`` —— 但只有「人话」标题才用。
+    2. ``title`` 以 ``Group:`` 开头（大小写不敏感、容忍前后空白）→ 返回 ``群聊``，
+       并且**不再往后回落**：群聊本身就是答案。前缀后面那串
+       ``rmukls1dr-u871o · tmulchpfa-yu7jb`` 是机器生成的会话标识，
+       挂到桌面上对人没有任何意义，只会把桌面弄脏。
+    3. 其余 ``title`` —— 但只有「人话」标题才用。
        判定规则：标题里只要出现**连续 8 个及以上**的 ``[a-z0-9]``
        （小写字母或数字，例如 ``rmukls1dr``、``1a2b3c4d5e``），
-       就认为这是 Hermes 自动生成的群聊/会话标识（哈希串），
-       **整条标题作废**，继续往下找。
-       为什么不要哈希标题：字幕是直接挂在桌面上的，一串
-       ``Group: rmukls1dr-u871o · tmulchpfa-yu7jb`` 对人没有任何意义，
-       只会把桌面弄脏；而人类自己起的标题（``桌宠``、``cupk 论坛``）
-       恰好不含这种长串，必须保留。
-    3. ``profile_name`` —— 非空就用它，表达「这是哪个 profile 在干活」。
+       就认为这是 Hermes 自动生成的会话标识（哈希串），**整条标题作废**，
+       继续往下找。
+       为什么不要哈希标题：字幕是直接挂在桌面上的，一串哈希没人看得懂；
+       而人类自己起的标题（``桌宠``、``cupk 论坛``）恰好不含这种长串，必须保留。
     4. 都没有 → 返回 ``""``，让上层（``protocol.py`` 拼 ``·`` 分隔符的地方）
        自然不显示分隔符，而不是挂一个空的分隔符在字幕上。
+
+    ``profile_name`` **不参与取名**，只是留在签名上（调用方照旧传）：它是机器人名
+    （``ops``/``coder``/``lead``），说的是「哪个机器人在干活」，不是「在哪个项目里
+    干活」，拿它顶替项目名会把两件事混为一谈 —— 群聊会话没有 cwd、标题又全是哈希，
+    桌面上就会凭空冒出一个 ``ops``。宁可空着。
     """
     if cwd:
         directory = Path(cwd).expanduser()
@@ -75,10 +87,12 @@ def _project_name(
             return directory.name
 
     text = (title or "").strip()
+    if _GROUP_TITLE.match(text):
+        return _GROUP_LABEL
     if text and not _HASH_RUN.search(text):
         return text
 
-    return (profile_name or "").strip()
+    return ""
 
 
 def find_state_dbs(home: str | os.PathLike[str] | None = None) -> list[Path]:

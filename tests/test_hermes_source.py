@@ -122,8 +122,10 @@ def test_find_state_dbs_sorted_newest_first(tmp_path):
 #: 也保证测试不去碰真实的 ~/.hermes。
 _FAKE_HOME = "/Users/alice"
 
-#: Hermes 自动生成的群聊标题：`rmukls1dr`、`tmulchpfa` 都是连续 9 位 [a-z0-9]，纯机器哈希
+#: Hermes 自动生成的群聊标题：`rmukls1dr`、`tmulchpfa` 都是连续 9 位 [a-z0-9]，纯机器哈希。
+#: 注意它自带 `Group: ` 前缀 —— 那就已经是「群聊」了，不该再往后回落 profile 名。
 _GROUP_TITLE = "Group: rmukls1dr-u871o · tmulchpfa-yu7jb"
+_GROUP_CHAT = "群聊"
 
 
 @pytest.mark.parametrize(
@@ -133,18 +135,25 @@ _GROUP_TITLE = "Group: rmukls1dr-u871o · tmulchpfa-yu7jb"
         (None, "桌宠", "lead", "桌宠"),  # 人话标题必须保留，不能一刀切禁掉 title
         ("", "桌宠", None, "桌宠"),  # 空串 cwd 等于「没有 cwd」
         ("/Users/alice", "桌宠", "lead", "桌宠"),  # 主目录本身：不许把用户名挂桌面上
-        ("/Users/alice", _GROUP_TITLE, "lead", "lead"),  # 主目录 + 哈希标题 → 退到 profile 名
+        ("/Users/alice", _GROUP_TITLE, "lead", _GROUP_CHAT),  # 主目录 + 群聊标题 → 群聊
         ("/", "桌宠", "lead", "桌宠"),  # 根目录同样不携带项目信息
-        ("/", _GROUP_TITLE, None, ""),  # 三条线索全废 → 空串，上层就不拼 ·
-        (None, None, None, ""),  # 同上：空串而不是 None
-        (None, "rmukls1d", "lead", "lead"),  # 连续 8 位就算哈希（阈值含 8）
+        ("/", _GROUP_TITLE, None, _GROUP_CHAT),  # 根目录也救不了 `Group:` 前缀
+        (None, None, None, ""),  # 没有任何线索 → 空串而不是 None
+        (None, "Group: 桌宠", "lead", _GROUP_CHAT),  # 群聊前缀优先于「标题是人话」
+        (None, "  Group: abc12345  ", "ops", _GROUP_CHAT),  # 前后空白、大小写要容忍
+        (None, "rmukls1d", "lead", ""),  # 8 位哈希 + 无 cwd → 空串（**不许**回落 profile 名）
+        (None, "rmukls1dr", "ops", ""),  # profile 名是机器人名，不是项目名
         (None, "rmukls1", "lead", "rmukls1"),  # 7 位还是人话，得留着
         # 边界：cwd 结尾带斜杠（宿主写库时常见），basename 不能被斜杠吃成空串
         ("/Users/alice/ChenC/xiaocc/", "桌宠", "lead", "xiaocc"),
     ],
 )
 def test_project_name_priority(cwd, title, profile_name, expected):
-    """优先级：cwd basename → 人话 title → profile 名 → 空串。"""
+    """优先级：cwd basename → `Group:` 前缀（群聊）→ 人话 title → 空串。
+
+    `profile_name` 参数保留只为兼容调用方，**不再参与取名** —— 它是机器人名
+    （ops/coder/lead），挂到桌面上比挂哈希更难解释。
+    """
     assert _project_name(cwd, title, profile_name, home=_FAKE_HOME) == expected
 
 
