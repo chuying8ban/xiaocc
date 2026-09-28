@@ -49,6 +49,17 @@ ops/xiaoccctl logs err    # 看 stderr 末尾 40 行
 取代小汐时对这份 plist 只动了两处（Label 没改，避免牵连别处）：
 `EnvironmentVariables.XIAOXI_PET_LABEL=ai.hermes.xiaocc`、`KeepAlive.OtherJobEnabled.ai.hermes.xiaocc=true`。
 
+**一句话语义（别让下一个人以为 keepawake 坏了）**
+
+* 小cc **在跑** ⇒ 守卫持有 `caffeinate -i` ⇒ 机器不因空闲而睡。
+* 小cc **被 bootout**（`xiaoccctl stop`，或临时掐掉）⇒ 守卫在 ≤20 秒内**自己退出并释放断言** ⇒
+  **机器恢复「空闲 1 分钟就睡」，这是设计，不是故障** —— 守卫存在的全部理由就是「桌宠在，机器就别睡」。
+* 之后 `start` 时守卫**不会**被 launchd 自动拉回（见上一条机制），所以 `xiaoccctl start` 每次都会
+  `kickstart` 它，别绕过脚本手工 `bootstrap` 面板。
+* 实测留痕（2026-09-29）：`sleepguard.log` 里 `00:41:31 小汐（ai.hermes.xiaocc）已关掉 ⇒ 守卫退出，机器可以照常睡`——
+  括号里是 label 实参，脚本里的字面文案还写着「小汐」（`~/.hermes/scripts/xiaoxi_sleep_guard.sh` 是用户资产，我没改）。
+  判断「闸门在不在」永远看 `pmset -g assertions | grep PreventUserIdleSystemSleep` 和守卫日志，**不看脚本名字**。
+
 ## 4. 回滚：30 秒内恢复旧桌宠小汐
 
 ```sh
@@ -68,3 +79,30 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.hermes.mascot-pet.p
 
 `ops/baseline/` 是动手前的原件（三个 plist）与 `baseline.txt`（当时 `launchctl list` / 进程 / 断言快照）。
 `ops/xiaoccctl uninstall` 不在计划里 —— 要拆就按 §4 反着来，一步可逆。
+
+## 6. arm（装回去）的门槛，与 ops 的测量方法
+
+@lead 定的门槛：`doctor` 全绿 + 启动后 60 秒稳态 `ps` 里该进程 **< 5%** + 位置留痕就位；不达标不许装回去。
+
+**怎么量**（冷启动那十几秒不算，两次取样做差，窗口 ≥60 秒）：
+
+```sh
+ops/xiaoccctl start && sleep 15
+PID=$(launchctl print "gui/$(id -u)/ai.hermes.xiaocc" | awk '$1=="pid"{print $3; exit}')
+A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 超过一分钟会变成 MM:SS.ss 以上格式，两种都要会解析
+```
+
+⚠️ **必须量 launchd 启动的那一份，别量手工跑的**。plist 里 `ProcessType=Interactive` 是让 33ms 定时器按点触发的
+（动画不卡的原因），代价是每一拍的开销都要真付。2026-09-29 实测**同一份代码**：
+手工前台实例 **4.2%**、launchd（Interactive）实例 **15.2%**（6×10s 分段恒定 15.0~15.6%），旧桌宠小汐同规格自报 **4.6~5%**。
+所以「4.3% 通过」这类结论必须写清是哪种启动方式量的，否则不是同一个数。
+
+**当前记录（2026-09-29）**：CPU 忙等已修（99.9% → 手工前台 4.2%），但 **launchd 路径 15.2% 未达门槛，
+面板处于停止状态**（`42b97c8`、`ops/findings-2026-09-29.md`）；位置语义已独立复跑
+`scripts/verify_anchor.py` **6/6**（含「外部位移 → 回锚 + 日志留痕」）。
+
+**跑任何自检/测试都要设 `XIAOCC_ANCHOR_FILE=<临时路径>`**：不设就会往真实锚点 `~/.xiaocc/anchor.json` 写假坐标，
+面板一 arm 就落在屏幕中间（codex 自测已犯过一次，留了个 (635,334) 的假锚点）。
+
+`doctor` 的第 ⑩ 项会读锚点文件跟实测窗口矩形对一下（Δ≤6px 算一致）并打出最近一行位移留痕 ——
+**只提示、不判失败**：拖拽搬家、贴边收起都是合法态，别把交互误报成故障。

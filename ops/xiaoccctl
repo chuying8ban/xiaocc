@@ -301,6 +301,32 @@ cmd_doctor() {
   else
     print "✗ ⑨ 日志为空 —— 面板起来了吗"; fail=1
   fi
+  # ⑩ 锚点核对（位置语义）：只提示、不判死 —— 拖拽/贴边都是合法态，别把交互误报成故障
+  local afile="${XIAOCC_ANCHOR_FILE:-$HOME/.xiaocc/anchor.json}" verdict pline
+  if [[ ! -f "$afile" ]]; then
+    print "ℹ ⑩ 还没有锚点文件（$afile）—— 没被拖动过，锚点取启动参数 $(_corner)"
+  elif [[ -z "${win:-}" || "${win}" == *'"count":null'* || "${win}" == *'"count":-1'* ]]; then
+    print "ℹ ⑩ 有锚点文件，但当前没有窗口可核对（面板没跑或抓不到）"
+  else
+    verdict=$("$PY" - "$afile" "$win" <<'PYEOF' 2>/dev/null
+import json, sys
+try:
+    a = json.load(open(sys.argv[1])); w = json.loads(sys.argv[2])
+except Exception as exc:
+    print(f"读不出来：{exc}"); raise SystemExit(0)
+if not w.get("windows"):
+    print("没有窗口可核对（进程在但看不见）"); raise SystemExit(0)
+r = w["windows"][0]
+dx, dy = r["x"] - a.get("x", 0), r["y"] - a.get("y", 0)
+same = "一致" if max(abs(dx), abs(dy)) <= 6 else "不一致 —— 看日志里的「位置变化」行 / probe 的 anchor_ok"
+print(f"锚点 ({a.get('x'):.0f},{a.get('y'):.0f}) vs 实测 ({r['x']},{r['y']}) ⇒ Δ({dx:+.0f},{dy:+.0f}) {same}")
+PYEOF
+)
+    print "ℹ ⑩ ${verdict}"
+  fi
+  pline=$(grep -E "位置变化|锚点已更新|窗口漂移" "$PANEL_ERR" 2>/dev/null | tail -1)
+  [[ -n "$pline" ]] && print "ℹ   最近位移留痕：${pline}"
+
   (( fail == 0 )) && print "== 全部通过 ==" || print "== 有失败项（见上面 ✗）=="
   _write_state "$([[ $fail == 0 ]] && print '' || print 'doctor 有失败项')"
   (( fail == 0 )) && return 0 || return 4
