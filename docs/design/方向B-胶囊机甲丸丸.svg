@@ -1,0 +1,93 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="380" viewBox="0 0 820 380" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">
+  <defs>
+    <linearGradient id="bgB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F6F7FB"/><stop offset="1" stop-color="#E7EAF3"/>
+    </linearGradient>
+    <linearGradient id="shellB" x1="0.15" y1="0" x2="0.85" y2="1">
+      <stop offset="0" stop-color="#FFFFFF"/><stop offset="0.6" stop-color="#EEF1F7"/><stop offset="1" stop-color="#D3DAE8"/>
+    </linearGradient>
+    <linearGradient id="visorB" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2A3242"/><stop offset="1" stop-color="#171C26"/>
+    </linearGradient>
+    <radialGradient id="glowB" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6FD3E8" stop-opacity="0.5"/><stop offset="1" stop-color="#6FD3E8" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <rect width="820" height="380" fill="url(#bgB)"/>
+  <text x="28" y="40" font-size="19" font-weight="700" fill="#26303F">方向 B · 胶囊机甲「丸丸」</text>
+  <text x="28" y="63" font-size="13" fill="#5C6B7E">圆角胶囊身 + 面罩单眼 + 底部呼吸灯环 · 状态 = 灯色 + 面罩表情</text>
+
+  <!-- ===== 待机 idle ===== -->
+  <g transform="translate(150 252)">
+    <ellipse cx="0" cy="60" rx="60" ry="11" fill="#26303F" opacity="0.08"/>
+    <circle cx="0" cy="0" r="82" fill="url(#glowB)"/>
+    <!-- 手臂 -->
+    <path d="M-52 -6 q -22 6 -24 26" fill="none" stroke="#D3DAE8" stroke-width="11" stroke-linecap="round"/>
+    <path d="M52 -6 q 22 6 24 26" fill="none" stroke="#D3DAE8" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="-77" cy="22" r="9" fill="#EEF1F7" stroke="#CDD5E4" stroke-width="1.6"/>
+    <circle cx="77" cy="22" r="9" fill="#EEF1F7" stroke="#CDD5E4" stroke-width="1.6"/>
+    <!-- 身体 -->
+    <rect x="-52" y="-58" width="104" height="116" rx="44" fill="url(#shellB)" stroke="#C9D2E2" stroke-width="1.6"/>
+    <rect x="-52" y="-58" width="104" height="116" rx="44" fill="none" stroke="#FFFFFF" stroke-width="3" opacity="0.7"/>
+    <!-- 面罩 -->
+    <rect x="-38" y="-34" width="76" height="46" rx="21" fill="url(#visorB)"/>
+    <rect x="-38" y="-34" width="76" height="46" rx="21" fill="none" stroke="#6FD3E8" stroke-width="1.4" opacity="0.45"/>
+    <path d="M-20 12 q 20 -26 40 0" fill="none" stroke="#6FD3E8" stroke-width="4.4" stroke-linecap="round"/>
+    <circle cx="-30" cy="-24" r="7" fill="#FFFFFF" opacity="0.16"/>
+    <!-- 灯环 -->
+    <rect x="-30" y="30" width="60" height="9" rx="4.5" fill="#6FD3E8" opacity="0.85"/>
+    <!-- 天线 -->
+    <path d="M0 -58 v -16" stroke="#C9D2E2" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="-80" r="7" fill="#6FD3E8"/>
+  </g>
+  <text x="150" y="352" font-size="13.5" text-anchor="middle" fill="#3C4A5C">待机 · 上下轻浮 + 灯环慢呼吸</text>
+
+  <!-- ===== 干活 working ===== -->
+  <g transform="translate(410 252)">
+    <ellipse cx="0" cy="60" rx="60" ry="11" fill="#26303F" opacity="0.08"/>
+    <circle cx="0" cy="0" r="82" fill="#FFC24B" opacity="0.18"/>
+    <path d="M-52 -6 q -22 6 -24 26" fill="none" stroke="#D3DAE8" stroke-width="11" stroke-linecap="round"/>
+    <!-- 右手举起扳手 -->
+    <path d="M52 -8 q 24 -18 26 -46" fill="none" stroke="#D3DAE8" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="78" cy="-58" r="9" fill="#EEF1F7" stroke="#CDD5E4" stroke-width="1.6"/>
+    <g transform="translate(86 -74) rotate(-28)">
+      <rect x="-4" y="-6" width="8" height="34" rx="4" fill="#B9C3D6"/>
+      <path d="M-9 -22 a 11 11 0 1 0 18 0 l -4 8 h -10 z" fill="#B9C3D6"/>
+    </g>
+    <rect x="-52" y="-58" width="104" height="116" rx="44" fill="url(#shellB)" stroke="#C9D2E2" stroke-width="1.6"/>
+    <rect x="-38" y="-34" width="76" height="46" rx="21" fill="url(#visorB)"/>
+    <path d="M-26 -20 l 16 8 M-26 -4 l 16 -8" fill="none" stroke="#FFC24B" stroke-width="4.4" stroke-linecap="round"/>
+    <path d="M10 -20 l 16 8 M10 -4 l 16 -8" fill="none" stroke="#FFC24B" stroke-width="4.4" stroke-linecap="round"/>
+    <rect x="-30" y="30" width="60" height="9" rx="4.5" fill="#FFC24B" opacity="0.95"/>
+    <path d="M0 -58 v -16" stroke="#C9D2E2" stroke-width="3" stroke-linecap="round"/>
+    <circle cx="0" cy="-80" r="7" fill="#FFC24B"/>
+    <g stroke="#FFC24B" stroke-width="3" stroke-linecap="round" opacity="0.8">
+      <path d="M-70 -50 l -12 -10"/><path d="M-76 -26 l -15 -4"/>
+    </g>
+  </g>
+  <text x="410" y="352" font-size="13.5" text-anchor="middle" fill="#3C4A5C">干活 · 面罩变 &gt;&lt; · 灯环转成琥珀色</text>
+
+  <!-- ===== 出错 error ===== -->
+  <g transform="translate(670 252)">
+    <ellipse cx="0" cy="60" rx="60" ry="11" fill="#26303F" opacity="0.08"/>
+    <circle cx="0" cy="0" r="82" fill="#F2665E" opacity="0.16"/>
+    <path d="M-52 -6 q -22 10 -24 28" fill="none" stroke="#D3DAE8" stroke-width="11" stroke-linecap="round"/>
+    <path d="M52 -6 q 22 10 24 28" fill="none" stroke="#D3DAE8" stroke-width="11" stroke-linecap="round"/>
+    <circle cx="-77" cy="24" r="9" fill="#EEF1F7" stroke="#CDD5E4" stroke-width="1.6"/>
+    <circle cx="77" cy="24" r="9" fill="#EEF1F7" stroke="#CDD5E4" stroke-width="1.6"/>
+    <g transform="rotate(-5)">
+      <rect x="-52" y="-58" width="104" height="116" rx="44" fill="url(#shellB)" stroke="#E5BEBE" stroke-width="1.8"/>
+      <rect x="-38" y="-34" width="76" height="46" rx="21" fill="url(#visorB)"/>
+      <path d="M-26 -22 l 14 14 M-12 -22 l -14 14" fill="none" stroke="#F2665E" stroke-width="4.4" stroke-linecap="round"/>
+      <path d="M10 -22 l 14 14 M24 -22 l -14 14" fill="none" stroke="#F2665E" stroke-width="4.4" stroke-linecap="round"/>
+      <rect x="-30" y="30" width="60" height="9" rx="4.5" fill="#F2665E"/>
+      <path d="M0 -58 v -16" stroke="#C9D2E2" stroke-width="3" stroke-linecap="round"/>
+      <circle cx="0" cy="-80" r="7" fill="#F2665E"/>
+    </g>
+    <g stroke="#F2665E" stroke-width="3" stroke-linecap="round" opacity="0.85">
+      <path d="M64 -76 l 10 -14"/><path d="M74 -54 l 14 -6"/>
+    </g>
+  </g>
+  <text x="670" y="352" font-size="13.5" text-anchor="middle" fill="#3C4A5C">出错 · 面罩 ×× · 灯环红闪 + 头顶冒火花</text>
+</svg>

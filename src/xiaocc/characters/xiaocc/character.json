@@ -1,0 +1,54 @@
+{
+  "id": "xiaocc",
+  "name": "小cc",
+  "version": "0.1.0",
+  "author": "ChenC",
+  "license": "MIT",
+  "canvas": { "width": 220, "height": 240 },
+  "default_scale": 1.0,
+  "palette": {
+    "body": "#F4EFE6",
+    "shade": "#DCD3C4",
+    "ink": "#2B2E3A",
+    "accent": "#6FD3E8",
+    "glow": "#B7E9F5"
+  },
+  "states": {
+    "idle": {
+      "motion": "float",
+      "accent": "#6FD3E8",
+      "caption": "待命"
+    },
+    "thinking": {
+      "motion": "ponder",
+      "accent": "#8FA7FF",
+      "caption": "思考中"
+    },
+    "working": {
+      "motion": "busy",
+      "accent": "#FFC24B",
+      "caption": "干活中"
+    },
+    "waiting": {
+      "motion": "beckon",
+      "accent": "#FF8A5B",
+      "caption": "等你确认"
+    },
+    "done": {
+      "motion": "cheer",
+      "accent": "#5BD08A",
+      "caption": "搞定"
+    },
+    "error": {
+      "motion": "wobble",
+      "accent": "#F2665E",
+      "caption": "出错了"
+    },
+    "offline": {
+      "motion": "sleep",
+      "accent": "#9AA1B1",
+      "caption": "离线"
+    }
+  },
+  "assets": {}
+}

@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xiaocc"
+version = "0.1.0"
+description = "小cc —— 住在桌面上的可扩展状态伴侣：任何工作流都能驱动它"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "ChenC" }]
+keywords = ["desktop-pet", "agent", "status", "macos", "hermes", "always-on-top"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: MacOS X",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Desktop Environment",
+]
+
+# 核心零依赖：协议层、状态源、角色加载都不碰图形库。
+# 显示层（backend）按平台另装，这样 CI 能在任意系统上跑核心测试。
+dependencies = []
+
+[project.optional-dependencies]
+macos = ["pyobjc-framework-Cocoa>=10.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+xiaocc = "xiaocc.cli:main"
+
+# —— 扩展点：第三方包只要声明同名 entry point，就能被自动发现，无需改核心代码 ——
+[project.entry-points."xiaocc.sources"]
+file = "xiaocc.sources.file:FileSource"
+command = "xiaocc.sources.command:CommandSource"
+hermes = "xiaocc.sources.hermes:HermesSource"
+
+[project.entry-points."xiaocc.backends"]
+console = "xiaocc.backends.console:ConsoleBackend"
+
+[project.entry-points."xiaocc.characters"]
+default = "xiaocc.characters:builtin_character_dir"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["xiaocc*"]
+
+[tool.setuptools.package-data]
+xiaocc = ["characters/*/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

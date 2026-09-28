@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 测试与工具
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# 运行时产物（用户数据绝不入库）
+~/.xiaocc/
+*.log
+.DS_Store
+
+# 本地私有配置
+local/
+*.local.json

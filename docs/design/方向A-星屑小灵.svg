@@ -1,0 +1,105 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="380" viewBox="0 0 820 380" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">
+  <defs>
+    <linearGradient id="bgA" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F7FAFF"/><stop offset="1" stop-color="#E8F1FA"/>
+    </linearGradient>
+    <linearGradient id="bodyA" x1="0.2" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#FDFBF5"/><stop offset="0.55" stop-color="#EDF3FA"/><stop offset="1" stop-color="#D6E6F6"/>
+    </linearGradient>
+    <radialGradient id="cheekA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#F7B7C0" stop-opacity="0.85"/><stop offset="1" stop-color="#F7B7C0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowA" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#8FE3F2" stop-opacity="0.55"/><stop offset="1" stop-color="#8FE3F2" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="tailA" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#A9E6F5" stop-opacity="0.9"/><stop offset="1" stop-color="#A9E6F5" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="820" height="380" fill="url(#bgA)"/>
+  <text x="28" y="40" font-size="19" font-weight="700" fill="#26303F">方向 A · 星屑小灵「阿星」</text>
+  <text x="28" y="63" font-size="13" fill="#5C6B7E">一小团会漂的星云绒毛 · 头顶星芒 = 状态色 · 彗尾随动作摆动</text>
+
+  <!-- ===== 待机 idle ===== -->
+  <g transform="translate(150 250)">
+    <ellipse cx="0" cy="62" rx="62" ry="12" fill="#26303F" opacity="0.07"/>
+    <circle cx="0" cy="-6" r="86" fill="url(#glowA)"/>
+    <g opacity="0.75">
+      <circle cx="70" cy="4" r="7" fill="#BED9F2"/>
+      <circle cx="96" cy="14" r="5" fill="#CFE3F6"/>
+      <circle cx="118" cy="24" r="3.4" fill="#E1EDF9"/>
+    </g>
+    <ellipse cx="0" cy="-62" rx="46" ry="10" fill="none" stroke="#C7E7F5" stroke-width="2.5" opacity="0.9"/>
+    <path d="M0 -74 C 38 -74 58 -44 58 -8 C 58 30 32 54 0 54 C -32 54 -58 30 -58 -8 C -58 -44 -38 -74 0 -74 Z" fill="url(#bodyA)" stroke="#C9DDF0" stroke-width="1.5"/>
+    <path d="M0 -52 L 0 -80" stroke="#C9DDF0" stroke-width="3" stroke-linecap="round"/>
+    <path d="M0 -96 l 5.5 13 13.5 1.6 -10 9 2.6 13.4 -11.6 -7.4 -11.6 7.4 2.6 -13.4 -10 -9 13.5 -1.6 z" fill="#6FD3E8"/>
+    <circle cx="-21" cy="-10" r="16" fill="url(#cheekA)"/>
+    <circle cx="21" cy="-10" r="16" fill="url(#cheekA)"/>
+    <path d="M-24 -16 q 8 -9 16 0" fill="none" stroke="#2B2E3A" stroke-width="4" stroke-linecap="round"/>
+    <path d="M8 -16 q 8 -9 16 0" fill="none" stroke="#2B2E3A" stroke-width="4" stroke-linecap="round"/>
+    <path d="M-7 8 q 7 7 14 0" fill="none" stroke="#2B2E3A" stroke-width="3.4" stroke-linecap="round"/>
+    <text x="72" y="-70" font-size="15" fill="#8FA3B8">z</text>
+  </g>
+  <text x="150" y="352" font-size="13.5" text-anchor="middle" fill="#3C4A5C">待机 · 呼吸 + 缓慢上下漂</text>
+
+  <!-- ===== 干活 working ===== -->
+  <g transform="translate(410 250)">
+    <ellipse cx="0" cy="62" rx="62" ry="12" fill="#26303F" opacity="0.07"/>
+    <circle cx="0" cy="-6" r="86" fill="#FFC24B" opacity="0.16"/>
+    <g opacity="0.75">
+      <circle cx="70" cy="4" r="7" fill="#BED9F2"/>
+      <circle cx="96" cy="14" r="5" fill="#CFE3F6"/>
+      <circle cx="118" cy="24" r="3.4" fill="#E1EDF9"/>
+    </g>
+    <path d="M0 -76 C 39 -76 59 -45 59 -8 C 59 31 33 55 0 55 C -33 55 -59 31 -59 -8 C -59 -45 -39 -76 0 -76 Z" fill="url(#bodyA)" stroke="#C9DDF0" stroke-width="1.5"/>
+    <path d="M0 -52 L 0 -80" stroke="#C9DDF0" stroke-width="3" stroke-linecap="round"/>
+    <path d="M0 -96 l 5.5 13 13.5 1.6 -10 9 2.6 13.4 -11.6 -7.4 -11.6 7.4 2.6 -13.4 -10 -9 13.5 -1.6 z" fill="#FFC24B"/>
+    <circle cx="-22" cy="-8" r="15" fill="url(#cheekA)"/>
+    <circle cx="22" cy="-8" r="15" fill="url(#cheekA)"/>
+    <path d="M-27 -22 l 18 8 M-27 -6 l 18 -8" fill="none" stroke="#2B2E3A" stroke-width="4" stroke-linecap="round"/>
+    <path d="M9 -22 l 18 8 M9 -6 l 18 -8" fill="none" stroke="#2B2E3A" stroke-width="4" stroke-linecap="round"/>
+    <path d="M-8 12 h 16" stroke="#2B2E3A" stroke-width="3.4" stroke-linecap="round"/>
+    <g transform="translate(58 -66)">
+      <circle r="13" fill="#FFE9BF" stroke="#E8A93A" stroke-width="2"/>
+      <circle r="4" fill="#E8A93A"/>
+      <g stroke="#E8A93A" stroke-width="3" stroke-linecap="round">
+        <path d="M0 -19 v -5"/><path d="M0 19 v 5"/><path d="M-19 0 h -5"/><path d="M19 0 h 5"/>
+      </g>
+    </g>
+    <g stroke="#FFC24B" stroke-width="3" stroke-linecap="round" opacity="0.85">
+      <path d="M-78 -44 l -14 -10"/><path d="M-84 -18 l -16 -3"/>
+    </g>
+  </g>
+  <text x="410" y="352" font-size="13.5" text-anchor="middle" fill="#3C4A5C">干活 · 眼睛变成 &gt;&lt; · 头顶小齿轮转</text>
+
+  <!-- ===== 出错 error ===== -->
+  <g transform="translate(670 250)">
+    <ellipse cx="0" cy="62" rx="62" ry="12" fill="#26303F" opacity="0.07"/>
+    <circle cx="0" cy="-6" r="86" fill="#F2665E" opacity="0.15"/>
+    <g opacity="0.75">
+      <circle cx="70" cy="4" r="7" fill="#BED9F2"/>
+      <circle cx="96" cy="14" r="5" fill="#CFE3F6"/>
+      <circle cx="118" cy="24" r="3.4" fill="#E1EDF9"/>
+    </g>
+    <path d="M0 -74 C 38 -74 58 -44 58 -8 C 58 30 32 54 0 54 C -32 54 -58 30 -58 -8 C -58 -44 -38 -74 0 -74 Z" fill="url(#bodyA)" stroke="#E8C4C1" stroke-width="1.6" transform="rotate(-6)"/>
+    <g transform="rotate(-6)">
+      <path d="M0 -52 L 0 -80" stroke="#E8C4C1" stroke-width="3" stroke-linecap="round"/>
+      <path d="M-2 -98 l 6 -12 5 13 13 2.5 -9 8.5 2 13 -11 -7 -11 7 2 -13 -9 -8.5 13 -2.5 z" fill="#F2665E" transform="rotate(14 0 -92)"/>
+      <path d="M-26 -20 l 14 14 M-12 -20 l -14 14" fill="none" stroke="#2B2E3A" stroke-width="4.2" stroke-linecap="round"/>
+      <path d="M8 -20 l 14 14 M22 -20 l -14 14" fill="none" stroke="#2B2E3A" stroke-width="4.2" stroke-linecap="round"/>
+      <path d="M-7 14 q 7 -8 14 0" fill="none" stroke="#2B2E3A" stroke-width="3.4" stroke-linecap="round"/>
+      <circle cx="-24" cy="-2" r="14" fill="url(#cheekA)"/>
+      <circle cx="24" cy="-2" r="14" fill="url(#cheekA)"/>
+    </g>
+    <g stroke="#F2665E" stroke-width="3" stroke-linecap="round" opacity="0.8">
+      <path d="M-64 -74 l -10 -12"/><path d="M-72 -52 l -14 -4"/><path d="M64 -74 l 10 -12"/>
+    </g>
+  </g>
+  <text x="670" y="352" font-size="13.5" text-anchor="middle" fill="#3C4A5C">出错 · 微微歪头 + 抖动 + 星芒变红</text>
+
+  <!-- 状态色带 -->
+  <g transform="translate(28 20)">
+    <text x="0" y="0" font-size="0" fill="none">状态色带</text>
+  </g>
+</svg>
