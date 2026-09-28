@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from .characters import Character
 from .protocol import State, StatusEvent, pick
@@ -93,7 +93,9 @@ class Engine:
             key = getattr(source, "name", repr(source))
             try:
                 event = source.poll()
-            except Exception as exc:  # 隔离：一个源炸了不影响其它源
+            # 隔离**故意**宽：任何源抛任何异常都不许带崩桌宠；异常只进 health()
+            # + 日志（按消息去重），不进画面。
+            except Exception as exc:  # noqa: BLE001
                 message = f"{type(exc).__name__}: {exc}"
                 if self._errors.get(key) != message:
                     self._errors[key] = message

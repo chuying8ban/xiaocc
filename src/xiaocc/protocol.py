@@ -19,17 +19,18 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 __all__ = [
-    "State",
+    "PROTOCOL_VERSION",
     "STATE_PRIORITY",
     "STATE_TTL",
+    "State",
     "StatusEvent",
     "pick",
-    "PROTOCOL_VERSION",
 ]
 
 PROTOCOL_VERSION = 1
@@ -135,11 +136,13 @@ class StatusEvent:
         return json.dumps(payload, ensure_ascii=False)
 
     @classmethod
-    def from_json(cls, text: str) -> "StatusEvent":
+    def from_json(cls, text: str) -> StatusEvent:
         """解析状态源输出。字段缺失用默认值，非法状态名直接报错（不猜）。"""
         data = json.loads(text)
         if not isinstance(data, dict):
-            raise ValueError("状态必须是 JSON 对象")
+            # 载荷类型不对是「数据错」，不是调用方传错参数；源侧统一按 ValueError
+            # 归为「输出不合法」，改成 TypeError 会破掉那套约定。
+            raise ValueError("状态必须是 JSON 对象")  # noqa: TRY004
         try:
             state = State(data["state"])
         except KeyError as exc:

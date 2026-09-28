@@ -7,4 +7,4 @@ from .command import CommandSource
 from .file import FileSource
 from .hermes import HermesSource
 
-__all__ = ["StatusSource", "CommandSource", "FileSource", "HermesSource"]
+__all__ = ["CommandSource", "FileSource", "HermesSource", "StatusSource"]

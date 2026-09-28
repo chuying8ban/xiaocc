@@ -34,7 +34,7 @@ CREATE TABLE session_turn_leases (
 
 
 def _make_db(tmp_path, *, lease: bool, last_role: str, tool_name: str | None = None,
-             finish_reason: str | None = None, age: float = 0.0) -> "sqlite3.Connection":
+             finish_reason: str | None = None, age: float = 0.0) -> sqlite3.Connection:
     path = tmp_path / "state.db"
     conn = sqlite3.connect(path)
     conn.executescript(SCHEMA)

@@ -34,20 +34,21 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 from .protocol import State
 
 __all__ = [
+    "KNOWN_MOTIONS",
     "Character",
     "CharacterError",
-    "KNOWN_MOTIONS",
     "StateSpec",
+    "available_characters",
     "builtin_character_dir",
     "load_character",
-    "available_characters",
 ]
 
 _HEX = re.compile(r"^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$")

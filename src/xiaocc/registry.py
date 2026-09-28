@@ -12,7 +12,8 @@ from __future__ import annotations
 import importlib
 import importlib.metadata as md
 import warnings
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from .sources.base import StatusSource
 from .sources.command import CommandSource
@@ -20,12 +21,12 @@ from .sources.file import FileSource
 from .sources.hermes import HermesSource
 
 __all__ = [
-    "SOURCES",
     "BACKENDS",
-    "available_sources",
+    "SOURCES",
     "available_backends",
-    "load_source",
+    "available_sources",
     "load_backend",
+    "load_source",
     "parse_source_spec",
 ]
 
@@ -57,7 +58,8 @@ CHARACTERS = "xiaocc.characters"
 def _entry_points(group: str) -> dict[str, md.EntryPoint]:
     try:
         return {ep.name: ep for ep in md.entry_points(group=group)}
-    except Exception as exc:  # 元数据损坏时退回内置表
+    # 元数据是外部文件（别的包写的），坏法穷举不完；失败就退回内置表并 warn。
+    except Exception as exc:  # noqa: BLE001
         warnings.warn(f"读取 entry point {group} 失败：{exc}", stacklevel=2)
         return {}
 

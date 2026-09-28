@@ -21,9 +21,9 @@ __all__ = [
     "Render",
     "State",
     "StatusEvent",
+    "__version__",
     "load_character",
     "pick",
-    "__version__",
 ]
 
 __version__ = "0.1.0"

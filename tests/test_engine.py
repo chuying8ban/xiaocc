@@ -66,7 +66,7 @@ def test_engine_isolates_broken_source():
 
 
 def test_engine_reports_offline_when_no_source_speaks():
-    engine, clock = _engine([ScriptedSource([None])])
+    engine, _clock = _engine([ScriptedSource([None])])
     frame = engine.tick()
     assert frame is not None and frame.state is State.OFFLINE
     assert "没有任何状态源在线" in frame.event.detail

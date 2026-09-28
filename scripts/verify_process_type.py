@@ -42,7 +42,7 @@ ENTRY = REPO / ".venv/bin/xiaocc"
 def cpu_seconds(pid: int) -> float | None:
     """取进程累计 CPU 时间（秒）。macOS `ps -o time=` 是 [[hh:]mm:]ss.ss。"""
     out = subprocess.run(["ps", "-o", "time=", "-p", str(pid)],
-                         capture_output=True, text=True).stdout.strip()
+                         capture_output=True, text=True, check=False).stdout.strip()
     if not out:
         return None
     total = 0.0
@@ -80,7 +80,7 @@ def display_asleep() -> bool | None:
 
 def pid_of(label: str) -> int | None:
     out = subprocess.run(["launchctl", "print", f"gui/{UDID}/{label}"],
-                         capture_output=True, text=True).stdout
+                         capture_output=True, text=True, check=False).stdout
     for line in out.splitlines():
         line = line.strip()
         if line.startswith("pid = "):
@@ -119,7 +119,7 @@ def arm(name: str, process_type: str | None, seconds: float, warmup: float,
     path = AGENTS_DIR / f"{label}.plist"
     path.write_bytes(plistlib.dumps(plist))
     boot = subprocess.run(["launchctl", "bootstrap", f"gui/{UDID}", str(path)],
-                          capture_output=True, text=True)
+                          capture_output=True, text=True, check=False)
     if boot.returncode != 0:
         path.unlink(missing_ok=True)
         print(f"{name}: bootstrap 失败 rc={boot.returncode} {boot.stderr.strip()}")
@@ -150,7 +150,7 @@ def arm(name: str, process_type: str | None, seconds: float, warmup: float,
         return {"cpu": cpu, "loops": loops, "slept": slept}
     finally:
         subprocess.run(["launchctl", "bootout", f"gui/{UDID}/{label}"],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, check=False)
         time.sleep(2)
         path.unlink(missing_ok=True)
         anchor.unlink(missing_ok=True)
