@@ -7,6 +7,7 @@
     xiaocc run -b appkit --backend-opt at=bottom-left   # 给显示层传选项
     xiaocc character validate ./my-character
     xiaocc where                      # 关键路径，排障先看这个
+    xiaocc probe                      # 面板是不是「省电且没被节流」（退出码即判据）
 
 ``--once`` 只跑一轮，供脚本和 CI 用。
 """
@@ -15,7 +16,9 @@ from __future__ import annotations
 
 import argparse
 import inspect
+import json
 import logging
+import os
 import signal
 import sys
 import time
@@ -23,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__, characters, registry
+from .backends.anchor_store import anchor_path
 from .engine import Engine
 
 __all__ = ["main"]
@@ -41,6 +45,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("sources", help="列出可用状态源")
     sub.add_parser("backends", help="列出可用显示层")
     sub.add_parser("where", help="打印关键路径")
+    sub.add_parser("probe", help="读显示层的自证据：面板是不是「省电且没被节流」")
 
     run = sub.add_parser("run", help="启动小cc")
     run.add_argument(
@@ -97,10 +102,71 @@ def _cmd_backends() -> int:
     return 0
 
 
+def _probe_file() -> Path:
+    """自证据文件的实际路径（与显示层同口径：``XIAOCC_PROBE_FILE`` 优先）。"""
+    override = os.environ.get("XIAOCC_PROBE_FILE")
+    return Path(override).expanduser() if override else Path.home() / ".xiaocc" / "probe.json"
+
+
+def _cmd_probe() -> int:
+    """读显示层落盘的自证据，判断门槛过没过 —— **退出码就是判据**（doctor / CI 直接断言）。
+
+    为什么非看两个数不可：**CPU 低有两种可能** —— 真的省，或者被节流了（画面其实在卡）。
+    ``ps`` 只给得出前者；圈速只有进程内知道，所以「圈速 ≈ fps」这条必须从这份文件断言：
+    圈速远低于 fps = 被节流，远高于 fps = 又退回忙等，两种都不算达标。
+    """
+    target = _probe_file()
+    try:
+        info = json.loads(target.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        print(f"没有自证据文件：{target}")
+        print("（面板还没启动过？先 `xiaoccctl start`，或 `xiaocc run -b appkit` 前台跑一份）")
+        return 2
+    except (OSError, ValueError) as exc:
+        print(f"自证据文件读不了：{target}（{exc}）")
+        return 2
+
+    fps = float(info.get("fps") or 0.0)
+    loops = info.get("pump_loops_per_sec")
+    age = time.time() - float(info.get("at") or 0.0)
+    period = float(info.get("probe_interval_s") or 1.0)
+    stale_after = max(3.0, 3.0 * period)  # 快照本身一秒一写，三拍没更新就算过期
+
+    print(f"文件：{target}")
+    print(f"pid={info.get('pid')}  存活={info.get('alive')}  快照 {age:.1f}s 前"
+          f"（超过 {stale_after:.0f}s 算过期）")
+    print(f"fps={fps:g}  圈速={loops}/s  上一圈睡={info.get('pump_sleep_ms')}ms"
+          f"  状态={info.get('state')}")
+    print(f"锚点={info.get('anchor')}  关系={info.get('anchor_state')}  在锚点={info.get('anchor_ok')}")
+    print(f"文案={info.get('caption_drawn')!r}")
+
+    reasons: list[str] = []
+    if not info.get("alive"):
+        reasons.append("进程已不在（这份是上一次运行留下的快照）")
+    if age > stale_after:
+        reasons.append(f"快照过期 {age:.1f}s > {stale_after:.0f}s（面板卡死或没在跑）")
+    if loops is None:
+        reasons.append("快照里没有圈速字段（显示层太老？）")
+    elif fps > 0 and not (0.7 * fps <= loops <= 1.3 * fps):
+        why = "被节流，画面在卡" if loops < 0.7 * fps else "又退回忙等"
+        reasons.append(f"圈速 {loops:.0f}/s 偏离 fps={fps:g} 超 ±30%（{why}）")
+    if info.get("anchor_ok") is False:
+        reasons.append(f"窗口漂在锚点外（{info.get('anchor_state')}）")
+
+    if reasons:
+        print("门槛：未通过 —— " + "；".join(reasons))
+        return 1
+    print("门槛：通过（快照新鲜、圈速≈fps、窗口在锚点上）")
+    return 0
+
+
 def _cmd_where() -> int:
     print(f"内置角色目录：{characters.builtin_character_dir()}")
     print(f"用户角色目录：{Path.home() / '.xiaocc' / 'characters'}")
     print("用户状态文件：%s" % (Path.home() / ".xiaocc" / "status.json"))
+    # 运维脚本要能问到路径，别硬编码（环境变量覆盖后要显示实际那份）
+    print(f"窗口锚点文件：{anchor_path()}")
+    print(f"显示层自证据：{_probe_file()}")
     dbs = __import__("xiaocc.sources.hermes", fromlist=["find_state_dbs"]).find_state_dbs()
     print("检测到的 Hermes state.db：")
     for db in dbs or ["  (无)"]:
@@ -263,6 +329,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_backends()
     if args.command == "where":
         return _cmd_where()
+    if args.command == "probe":
+        return _cmd_probe()
     if args.command == "character":
         if args.char_command == "validate":
             return _cmd_character(args.path)

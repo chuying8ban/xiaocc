@@ -27,6 +27,7 @@ import os
 import plistlib
 import subprocess
 import sys
+import json
 import tempfile
 import time
 from pathlib import Path
@@ -50,6 +51,33 @@ def cpu_seconds(pid: int) -> float | None:
     return total
 
 
+def read_probe(path: Path, tries: int = 3, gap: float = 0.6) -> dict | None:
+    """读显示层落盘的自证据（`XIAOCC_PROBE_FILE`）。
+
+    为什么门槛必须同时看它：CPU 低有两种可能 —— 真的省，或者**被节流了**（动画其实在卡）。
+    `pump_loops_per_sec` 是进程内结算的上一秒圈速，圈速 ≈ fps 才说明「画面照跑、只是不烧核」。
+    """
+    for _ in range(tries):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            time.sleep(gap)
+            continue
+        if data.get("pump_loops_per_sec"):
+            return data
+        time.sleep(gap)
+    return None
+
+
+def display_asleep() -> bool | None:
+    """主显示器是不是睡着了 —— 屏幕一睡 CoreAnimation 就停画、数字会偏低，两臂必须在同一状态下取数。"""
+    try:
+        import Quartz
+    except ImportError:  # pragma: no cover - 环境相关
+        return None
+    return bool(Quartz.CGDisplayIsAsleep(Quartz.CGMainDisplayID()))
+
+
 def pid_of(label: str) -> int | None:
     out = subprocess.run(["launchctl", "print", f"gui/{UDID}/{label}"],
                          capture_output=True, text=True).stdout
@@ -61,18 +89,21 @@ def pid_of(label: str) -> int | None:
 
 
 def arm(name: str, process_type: str | None, seconds: float, warmup: float,
-        source: str, fps: int) -> float | None:
+        source: str, fps: int) -> dict | None:
     if not ENTRY.is_file():
         sys.exit(f"找不到 venv 入口：{ENTRY}（先按 README 建 .venv）")
     label = f"{LABEL_PREFIX}-{'interactive' if process_type else 'plain'}"
     anchor = Path(tempfile.gettempdir()) / f"{label}-anchor.json"
     anchor.unlink(missing_ok=True)
+    probe = Path(tempfile.gettempdir()) / f"{label}-probe.json"
+    probe.unlink(missing_ok=True)
     plist: dict = {
         "Label": label,
         "RunAtLoad": True,
         "LimitLoadToSessionType": "Aqua",
         "WorkingDirectory": str(REPO),
         "EnvironmentVariables": {"XIAOCC_ANCHOR_FILE": str(anchor),
+                                 "XIAOCC_PROBE_FILE": str(probe),
                                  "PATH": "/usr/bin:/bin:/usr/sbin:/sbin"},
         "ProgramArguments": [str(ENTRY), "run", "--source", source, "-b", "appkit",
                              "--backend-opt", "at=bottom-right",
@@ -106,44 +137,77 @@ def arm(name: str, process_type: str | None, seconds: float, warmup: float,
             print(f"{name}: 进程中途退出（看 {plist['StandardErrorPath']}）")
             return None
         cpu = (t2 - t1) / seconds * 100.0
-        print(f"{name:38s} ProcessType={str(process_type):12s} CPU={cpu:5.1f}%"
-              f"   pid={pid}  累计 {t1}s → {t2}s")
-        return cpu
+        info = read_probe(probe) or {}
+        loops = info.get("pump_loops_per_sec")
+        slept = info.get("pump_sleep_ms")
+        ratio = f"{loops / fps:.2f}x fps" if loops else "圈速读不到"
+        print(f"{name:38s} ProcessType={process_type!s:12s} CPU={cpu:5.1f}%"
+              f"  圈速={loops or '-'!s:>5s}/s（{ratio}）"
+              f"  睡={slept if slept is not None else '-'}ms"
+              f"  pid={pid}  累计 {t1}s → {t2}s")
+        if loops is None:
+            print(f"    ⚠️ {probe} 没读到圈速：这臂只能看 CPU，判不了「是不是被节流了」")
+        return {"cpu": cpu, "loops": loops, "slept": slept}
     finally:
         subprocess.run(["launchctl", "bootout", f"gui/{UDID}/{label}"],
                        capture_output=True, text=True)
         time.sleep(2)
         path.unlink(missing_ok=True)
         anchor.unlink(missing_ok=True)
+        probe.unlink(missing_ok=True)
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="ProcessType 对面板 CPU 的 A/B")
-    ap.add_argument("--arm", choices=["both", "interactive", "plain"], default="both")
+    ap.add_argument("--arm", choices=["both", "interactive", "plain", "adaptive", "all"], default="both")
     ap.add_argument("--seconds", type=float, default=45.0, help="测量窗口（默认 45s）")
     ap.add_argument("--warmup", type=float, default=15.0, help="暖机（默认 15s）")
     ap.add_argument("--source", default="hermes", help="状态源（默认 hermes）")
     ap.add_argument("--fps", type=int, default=30, help="面板帧率（默认 30）")
     args = ap.parse_args()
 
+    asleep = display_asleep()
+    state = {True: "主显示器已睡（CoreAnimation 会停画，数字偏低，两臂必须同状态取数）",
+             False: "主显示器醒着", None: "读不到显示器状态（缺 Quartz）"}[asleep]
     print(f"仓库 {REPO}  源={args.source}  fps={args.fps}  测量窗口={args.seconds}s")
-    results: dict[str, float] = {}
+    print(f"显示器状态：{state}")
+    results: dict[str, dict] = {}
     if args.arm in ("both", "interactive"):
         v = arm("launchd + ProcessType=Interactive", "Interactive",
                 args.seconds, args.warmup, args.source, args.fps)
         if v is not None:
             results["interactive"] = v
-    if args.arm in ("both", "plain"):
+    if args.arm in ("both", "plain", "all"):
         v = arm("launchd 不带 ProcessType 键", None,
                 args.seconds, args.warmup, args.source, args.fps)
         if v is not None:
             results["plain"] = v
+    if args.arm in ("adaptive", "all"):
+        # Adaptive 的语义正是桌宠想要的：前台全速、后台/无人时可节流
+        v = arm("launchd + ProcessType=Adaptive", "Adaptive",
+                args.seconds, args.warmup, args.source, args.fps)
+        if v is not None:
+            results["adaptive"] = v
 
-    if len(results) == 2:
-        print(f"\nInteractive / 无键 = {results['interactive'] / results['plain']:.2f}x")
-        ok = results["plain"] < 5.0
-        print("门槛（无键那一路 < 5%，可比基准：小汐 4.6~5.0%）："
-              + ("通过" if ok else f"未通过（{results['plain']:.1f}%）"))
+    if len(results) >= 2:
+        a = results.get("interactive") or results.get("adaptive") or results["plain"]
+        b = results.get("adaptive") or results["plain"]
+        print(f"\nInteractive / 无键 = {a['cpu'] / b['cpu']:.2f}x（只看 CPU）")
+        # 门槛是**两件事**：省电（CPU < 5%）且没被节流（圈速 ≈ fps）。
+        # 只看 CPU 会把「卡成幻灯片但很省」判成通过；只看圈速会把忙等放过去。
+        cpu_ok = b["cpu"] < 5.0
+        loops = b["loops"]
+        rate_ok = loops is not None and 0.7 * args.fps <= loops <= 1.3 * args.fps
+        verdict = "通过" if (cpu_ok and rate_ok) else "未通过"
+        why = []
+        if not cpu_ok:
+            why.append(f"CPU {b['cpu']:.1f}% ≥ 5%")
+        if not rate_ok:
+            why.append("圈速读不到" if loops is None
+                       else f"圈速 {loops:.0f}/s 偏离 fps={args.fps} 超 ±30%"
+                            f"（{'被节流' if loops < 0.7 * args.fps else '退回忙等'}）")
+        print("门槛（无键那一路：CPU < 5% **且** 圈速 ≈ fps；可比基准：小汐 4.6~5.0%）："
+              + verdict + ("" if not why else "（" + "；".join(why) + "）"))
     leftovers = sorted(p.name for p in AGENTS_DIR.glob(f"{LABEL_PREFIX}*"))
     print("残留 plist：", leftovers or "无")
     return 0

@@ -18,11 +18,20 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+#: 取证脚本会真的拖动桌宠 → 必须把锚点与自证据指到临时路径。
+#: 不设的话，跑一次自测就把用户真实的 ~/.xiaocc/anchor.json 改成了脚本里的固定坐标，
+#: 下次面板一启动桌宠就落在屏幕中央（这个坑踩过两次了，两个文件都疼）。
+_TMP = Path(tempfile.gettempdir())
+os.environ.setdefault("XIAOCC_ANCHOR_FILE", str(_TMP / "xiaocc-shots-anchor.json"))
+os.environ.setdefault("XIAOCC_PROBE_FILE", str(_TMP / "xiaocc-shots-probe.json"))
 
 from xiaocc import characters
 from xiaocc.backends import window_layout as wl

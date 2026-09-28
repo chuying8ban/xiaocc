@@ -115,6 +115,31 @@ xiaocc run -b appkit --backend-opt at=bottom-left --backend-opt scale=0.8 --back
   **`anchor_ok` 只在「没人碰它却漂在别处」时为 `False`**，拖拽/贴边这些正常交互态都是 `True`，
   免得 doctor 把交互态误报成故障。
 
+### 5.1 自证据（`~/.xiaocc/probe.json`）与门槛
+
+显示层每秒把自己的一份快照落盘（原子写，`XIAOCC_PROBE_FILE` 可覆盖），**`xiaocc probe`** 读它并按
+退出码下判据（0 通过 / 1 没过 / 2 没有文件）。为什么非要落盘：**CPU 低有两种可能** —— 真的省，
+或者被节流了（动画其实在卡）。`ps` 只给得出前者，「圈速 ≈ fps」只有进程内知道。
+
+门槛是**两件事一起过**：CPU < 5% **且** 圈速在 fps 的 0.7~1.3 倍之间。实测反例（同一份代码、
+同一源、`fps=30`）：
+
+| 启动方式 | 屏幕 | CPU | 圈速 |
+| --- | --- | --- | --- |
+| 前台 `xiaocc run -b appkit` | 醒 | 4.2% | ≈30/s（1.0x） |
+| launchd + `ProcessType=Interactive` | 醒 | 16~18% | 28~30/s（0.94x） |
+| launchd 不带 `ProcessType` | 醒 | 8.2% | **11.5/s（0.38x，被节流）** |
+| launchd 不带 `ProcessType` | 睡 | 4.6% | **5.9/s（0.20x，被节流）** |
+| launchd + `ProcessType=Adaptive` | 醒 | 18.4% | 28/s（0.94x） |
+
+「不带键」那条只省了 CPU 是因为**画面真卡了**，光看 `ps` 会把它当成通过 —— 这就是门槛要两个数的原因。
+
+launchd 托管那份 15%+ 的 CPU 在哪：`sample` 抓栈是
+`CA::Layer::display_if_needed` → `-[NSViewBackingLayer display]` → CoreGraphics 软件光栅化
+（`RGBAf16_image_mark` 贴图 / `RGBAf16_shade_radial_RGB` 径向渐变 / `aa_render`、`aa_cubeto` 抗锯齿路径）。
+**是每帧重画的代价**，不是「画得多」那一类（降 fps 只会变成「被节流」）。要真降就得少画：
+把静态部分（角色图、光晕）先点阵化缓存再贴，别每帧重新走一遍路径+渐变的光栅化。
+
 ## 6. 踩过的坑（照抄容易，独立踩出来要花一晚上）
 
 | 坑 | 现象 | 正确做法 |

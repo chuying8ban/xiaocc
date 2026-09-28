@@ -32,8 +32,13 @@ SCREEN_W, SCREEN_H = 1512.0, 982.0
 #: 把锚点文件指到一个**不存在的**路径：这个脚本验的是 `at=`/默认角的算术，
 #: 而用户拖动会把锚点落盘（见 scripts/verify_anchor.py），残留的锚点文件会让
 #: 「默认右上角」那一例随机失败 —— 那不是回归，是测试自己没隔离。
-ANCHOR_ENV = {**os.environ, "XIAOCC_ANCHOR_FILE": str(Path(tempfile.gettempdir()) / "xiaocc-verify-no-anchor.json")}
-for _stale in (ANCHOR_ENV["XIAOCC_ANCHOR_FILE"],):
+ANCHOR_ENV = {
+    **os.environ,
+    "XIAOCC_ANCHOR_FILE": str(Path(tempfile.gettempdir()) / "xiaocc-verify-no-anchor.json"),
+    # 自证据同理：这些用例会真启动面板，不隔离就会往用户真实的 ~/.xiaocc/probe.json 里写
+    "XIAOCC_PROBE_FILE": str(Path(tempfile.gettempdir()) / "xiaocc-verify-probe.json"),
+}
+for _stale in (ANCHOR_ENV["XIAOCC_ANCHOR_FILE"], ANCHOR_ENV["XIAOCC_PROBE_FILE"]):
     Path(_stale).unlink(missing_ok=True)
 
 #: (说明, 文件名用的 slug, 附加参数, 期望退出码, 期望布局左上角)

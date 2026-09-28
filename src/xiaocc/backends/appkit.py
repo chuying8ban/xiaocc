@@ -20,8 +20,10 @@ c. 通用程序化骨架：只用 ``palette`` + ``canvas`` + ``motion`` 画「�
 
 from __future__ import annotations
 
+import json
 import logging
 import math
+import os
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
@@ -32,6 +34,7 @@ from ..characters import Character
 from ..engine import Render
 from ..protocol import State
 from . import window_layout as wl
+from .anchor_store import anchor_path as _anchor_path
 from .anchor_store import load_anchor, save_anchor
 from .base import Backend
 
@@ -278,6 +281,8 @@ class AppKitBackend(Backend):
         #: 用**墙钟**而不是「这一圈干了多少活」：主循环一圈里大部分时间在 sleep，
         #: 按活计时间攒，1 秒的节拍要十几秒才攒够一次自检 —— 漂了却半天没人管。
         self._last_drift_check = time.monotonic()
+        #: 自证据写盘失败只吵一次（诊断文件写不进去不该每秒刷屏，更不该影响桌宠）
+        self._probe_warned = False
         self._dragging = False
         self._drag_offset = (0.0, 0.0)
         self._started = time.monotonic()
@@ -348,6 +353,8 @@ class AppKitBackend(Backend):
 
     def close(self) -> None:
         if self._window is not None:
+            # 最后一份快照要标 dead，否则外部读到的是一份「看门狗看着还活着」的旧文件
+            self._write_probe(alive=False)
             try:
                 self._window.setIgnoresMouseEvents_(True)
                 self._window.orderOut_(None)
@@ -420,6 +427,49 @@ class AppKitBackend(Backend):
         if self._at_anchor():
             return "anchor", True
         return "drifted", False
+
+    def probe_path(self) -> Path:
+        """自证据文件的路径 —— 默认 ``~/.xiaocc/probe.json``，``XIAOCC_PROBE_FILE`` 可覆盖。
+
+        脚本和运维的 doctor 用它从**进程外**断言门槛，测试则必须覆盖它（别污染真实路径，
+        锚点那次已经踩过这个坑）。路径也进 :meth:`probe`，省得外部再猜一遍。
+        """
+        override = os.environ.get("XIAOCC_PROBE_FILE")
+        if override:
+            return Path(override).expanduser()
+        return Path.home() / ".xiaocc" / "probe.json"
+
+    def _write_probe(self, *, alive: bool = True) -> None:
+        """每秒把 :meth:`probe` 的快照落盘（原子写），给进程外的把关者用。
+
+        为什么非有不可：**CPU 低有两种可能** —— 真的省，或者被节流了（动画其实在卡）。
+        ``ps`` 只给得出前者；「圈速 ≈ fps」只有进程内知道（``pump_loops_per_sec`` /
+        ``pump_sleep_ms``），所以门槛的第二条必须靠这份文件从外面断言。
+        契约：**写失败绝不影响运行** —— 只 ``log.warning`` 一次，桌宠照跑。
+        """
+        try:
+            info = self.probe()
+            info.update(
+                {
+                    "pid": os.getpid(),
+                    "alive": alive,
+                    "at": time.time(),
+                    "fps": self.fps,
+                    "probe_interval_s": _DRIFT_CHECK_PERIOD,
+                    "probe_file": str(self.probe_path()),
+                    "anchor_file": str(_anchor_path()),
+                }
+            )
+            target = self.probe_path()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            tmp = target.with_name(target.name + ".tmp")
+            tmp.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, target)
+            self._probe_warned = False
+        except Exception as exc:  # noqa: BLE001 —— 诊断文件写不进去不该带崩桌宠
+            if not self._probe_warned:
+                self._probe_warned = True
+                log.warning("自证据落盘失败（不影响运行）：%s", exc)
 
     def _check_drift(self) -> None:
         """每秒一次的纠偏（``_pump`` 里调）：没人拖动、也不在贴边态，窗口却不在锚点上 → 回锚 + 留痕。
@@ -667,6 +717,7 @@ class AppKitBackend(Backend):
             if now - self._last_drift_check >= _DRIFT_CHECK_PERIOD:
                 self._last_drift_check = now
                 self._check_drift()
+                self._write_probe()  # 同一拍落盘，别为诊断多加定时器
             # 帧预算的余量睡掉（不超过本次 _pump 的截止时间）—— 这一句就是限速器
             nap = min(budget - (time.monotonic() - frame_start), deadline - time.monotonic())
             slept = 0.0
