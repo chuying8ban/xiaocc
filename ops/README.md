@@ -24,7 +24,9 @@ ops/xiaoccctl status      # 运行中退出 0，未运行退出 1
 ops/xiaoccctl start       # 幂等；顺带补起睡眠闸守卫
 ops/xiaoccctl stop        # bootout；本来没跑也返回 0
 ops/xiaoccctl restart
-ops/xiaoccctl doctor      # 全绿退出 0，有 ✗ 退出 4
+ops/xiaoccctl doctor      # 12 项自检，全绿退出 0，有 ✗ 退出 4
+ops/xiaoccctl gate [秒]   # 门槛：60s 稳态 CPU<5% **且** 圈速≈fps（退出码即判据）
+ops/xiaoccctl arm [秒]    # 装回去：start + 暖机 15s + gate，**不达标自动停回来**
 ops/xiaoccctl logs err    # 看 stderr 末尾 40 行
 ```
 
@@ -82,24 +84,34 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.hermes.mascot-pet.p
 
 ## 6. arm（装回去）的门槛，与 ops 的测量方法
 
-@lead 定的门槛：`doctor` 全绿 + 启动后 60 秒稳态 `ps` 里该进程 **< 5%** + 位置留痕就位；不达标不许装回去。
+@lead 定的门槛：`doctor` 全绿 + **CPU < 5% 且 圈速 ≈ fps**（@researcher 补的第二条，别让「便宜」其实是「被节流了」）
++ 位置留痕就位。**现在门槛是命令，不是口头约定**：
 
-**怎么量**（冷启动那十几秒不算，两次取样做差，窗口 ≥60 秒）：
+```sh
+ops/xiaoccctl arm          # start → 暖机 15s → 量 60s → 过则留着，不过则自动 stop（rc=4）
+ops/xiaoccctl gate 30      # 只量已经在跑的那一份，别动它
+```
+
+`arm` 的实测（2026-09-29 02:41，部署路径）：CPU **14.7%**（门槛 5%）但自证据**合格**
+（`fps=30 圈速=27.8/s 上一圈睡=30.0ms 状态=working`、快照 0.1s 新、`在锚点=True`）⇒ 判**不通过**并**自动停回去**（`arm rc=4`，job 卸载、无进程）。
+这条区分很关键：**它没在被节流**（圈速 27.8 ≈ fps 30，上圈真睡了 30ms，不是忙等），烧的是**每帧绘制**的钱。
+
+**手工复核**（不信脚本时）：
 
 ```sh
 ops/xiaoccctl start && sleep 15
 PID=$(launchctl print "gui/$(id -u)/ai.hermes.xiaocc" | awk '$1=="pid"{print $3; exit}')
-A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 超过一分钟会变成 MM:SS.ss 以上格式，两种都要会解析
+A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 过一分钟会变 HH:MM:SS，两种都要会解析
+.venv/bin/xiaocc probe                                            # 退出码即第二条判据：0 过 / 1 没过 / 2 没文件
 ```
 
-⚠️ **必须量 launchd 启动的那一份，别量手工跑的**。plist 里 `ProcessType=Interactive` 是让 33ms 定时器按点触发的
-（动画不卡的原因），代价是每一拍的开销都要真付。2026-09-29 实测**同一份代码**：
-手工前台实例 **4.2%**、launchd（Interactive）实例 **15.2%**（6×10s 分段恒定 15.0~15.6%），旧桌宠小汐同规格自报 **4.6~5%**。
-所以「4.3% 通过」这类结论必须写清是哪种启动方式量的，否则不是同一个数。
+⚠️ **必须量 launchd 启动的那一份，别量手工跑的**（同一份代码 4.2% vs 托管 15~17%，**不是代码差异，是 `ProcessType` 那一个键**）。
+⚠️ **记录显示器醒睡**（`doctor` 第 ⑫ 项会打）：屏幕睡着时 CoreAnimation 停画，CPU 天然偏低，两臂不可比。
 
-**当前记录（2026-09-29）**：CPU 忙等已修（99.9% → 手工前台 4.2%），但 **launchd 路径 15.2% 未达门槛，
-面板处于停止状态**（`42b97c8`、`ops/findings-2026-09-29.md`）；位置语义已独立复跑
-`scripts/verify_anchor.py` **6/6**（含「外部位移 → 回锚 + 日志留痕」）。
+**`ProcessType` 的结论（我这份 plist 的一行，已按 A/B 结果定住，别再顺手改）**：
+`Interactive` **保留** —— 换 `Adaptive` 是 16.6%，白换；整个删掉是 6.5% 但**圈速掉到 10.3/s（画面真卡了）**，
+门禁第二条本来就不放行。要降 CPU 只能改绘制路径（静态图层点阵化缓存），不是改这个键。
+理由与四臂数字已经写进 `ops/ai.hermes.xiaocc.plist` 的注释里（改 plist 记得 `cp` 同步安装份，否则 `doctor` ① 会报不一致）。
 
 **跑任何自检/测试都要设 `XIAOCC_ANCHOR_FILE=<临时路径>`**：不设就会往真实锚点 `~/.xiaocc/anchor.json` 写假坐标，
 面板一 arm 就落在屏幕中间（codex 自测已犯过一次，留了个 (635,334) 的假锚点）。

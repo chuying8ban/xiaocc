@@ -30,6 +30,15 @@
 
 	<key>ThrottleInterval</key>
 	<integer>10</integer>
+	<!-- 为什么必须是 Interactive（别顺手删掉或换成 Adaptive —— 2026-09-29 的 A/B 实测）：
+	     同一份代码、同源、同屏、fps=30，只换这个键：
+	       手工前台  4.2% / 圈速 ≈30     ← 不是同一把尺子，别拿它当门槛数
+	       Interactive 16.8% / 圈速 27.0 ← 现状
+	       Adaptive    16.6% / 圈速 27.8 ← 不比 Interactive 便宜，白换
+	       不带键      6.5% / 圈速 10.3  ← 省的是「画面真卡了」，被节流的假省电
+	     Interactive 换来的是定时器按点触发（动画不卡）；烧掉的是每帧软件光栅化的钱
+	     （sample 栈：CA::Layer::display_if_needed → CoreGraphics 软件光栅化）。
+	     要降 CPU 得改绘制路径（静态图层点阵化缓存），不是改这个键。 -->
 	<key>ProcessType</key>
 	<string>Interactive</string>
 	<key>LimitLoadToSessionType</key>

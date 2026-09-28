@@ -9,7 +9,9 @@
 #   ops/xiaoccctl start       # 幂等；plist 与仓库原件对齐后 bootstrap
 #   ops/xiaoccctl stop        # bootout；本来就没跑也算成功
 #   ops/xiaoccctl restart
-#   ops/xiaoccctl doctor      # 自检 9 项（含「窗口是否真的在屏幕上」）—— 人不在机器前时看这个
+#   ops/xiaoccctl doctor      # 自检 12 项（含「窗口是否真的在屏幕上」「自证据：圈速≈fps」）—— 人不在机器前时看这个
+#   ops/xiaoccctl gate [秒]   # 门槛测量：60s 稳态 CPU <5% 且 圈速 ≈ fps（@lead 定的门槛，退出码即判据）
+#   ops/xiaoccctl arm [秒]    # 装回去：start + 暖机 + gate，**不达标自动停回来**
 #   ops/xiaoccctl logs [err]  # 看面板日志
 #
 # 文件在哪：
@@ -65,6 +67,36 @@ _loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 }
 _pid()    { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3; exit}' }
 _corner() { /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST_DST" 2>/dev/null || print '?' }
 _installed() { [[ -f "$PLIST_DST" ]] }
+
+# 显示器醒睡：门槛数字必须连同它一起记录 —— 屏幕睡着时 CoreAnimation 停画，CPU 天然偏低，两臂不可比。
+_display_state() {
+  [[ -x "$PY" ]] || { print "未知"; return 0 }
+  "$PY" - <<'PYEOF' 2>/dev/null || print "未知"
+import Quartz
+d = Quartz.CGMainDisplayID()
+print("睡着（数字偏低，不可与醒着的臂比较）" if Quartz.CGDisplayIsAsleep(d) else "醒着")
+PYEOF
+}
+
+# 稳态 CPU：两次 `ps -o time=` 做差（返回百分比字符串）。time= 超过一分钟会变 HH:MM:SS，两种都要解析。
+_cpu_pct() {  # _cpu_pct <pid> <秒>
+  local pid="$1" secs="${2:-60}" a b
+  a=$(ps -o time= -p "$pid" 2>/dev/null | tr -d ' ')
+  [[ -n "$a" ]] || { print "nan"; return 0 }
+  sleep "$secs"
+  b=$(ps -o time= -p "$pid" 2>/dev/null | tr -d ' ')
+  "$PY" - "$a" "$b" "$secs" <<'PYEOF' 2>/dev/null || print "nan"
+import sys
+def secs(t):
+    p = [float(x) for x in t.split(':')]
+    return p[0] * 3600 + p[1] * 60 + p[2] if len(p) == 3 else p[0] * 60 + p[1]
+try:
+    a, b, n = secs(sys.argv[1]), secs(sys.argv[2]), float(sys.argv[3])
+except Exception:
+    print("nan"); raise SystemExit(0)
+print(f"{100 * (b - a) / n:.1f}")
+PYEOF
+}
 
 # 窗口采样：唯一的「进程活着但看不见」硬证据。
 # 输出两行：第 1 行 JSON（喂 state.json），第 2 行人话（给 doctor 显示）。
@@ -324,6 +356,24 @@ PYEOF
 )
     print "ℹ ⑩ ${verdict}"
   fi
+  # ⑪ 自证据（显示层每秒写 probe.json）：CPU 低有两种可能 —— 真的省，或者被节流了（画面其实在卡）
+  local pre probe_rc
+  if [[ -z "$pid" ]]; then
+    print "ℹ ⑪ 面板没在跑 —— 自证据无从谈起（不吃上一次留下的旧快照）"
+  else
+    pre=$("$ENTRY" probe 2>&1); probe_rc=$?
+    if (( probe_rc == 0 )); then
+      print "✓ ⑪ 自证据：省电且没被节流（圈速 ≈ fps）"
+      print -r -- "$pre" | sed -n '2,4p' | sed 's/^/    | /'
+    elif (( probe_rc == 1 )); then
+      print "✗ ⑪ 自证据不合格（圈速偏了／快照过期／进程已不在）："
+      print -r -- "$pre" | sed 's/^/    | /'; fail=1
+    else
+      print "ℹ ⑪ 没有自证据文件（面板还没跑过，或 XIAOCC_PROBE_FILE 指到了别处）"
+    fi
+  fi
+  # ⑫ 显示器醒睡：只报事实 —— 屏幕睡着时 CoreAnimation 停画，CPU 天然偏低，不能跟醒着的臂比
+  print "ℹ ⑫ 显示器：$(_display_state)"
   pline=$(grep -E "位置变化|锚点已更新|窗口漂移" "$PANEL_ERR" 2>/dev/null | tail -1)
   [[ -n "$pline" ]] && print "ℹ   最近位移留痕：${pline}"
 
@@ -337,15 +387,62 @@ cmd_logs() {
   return 0
 }
 
+# 门槛测量（@lead 定的）：CPU < 5% **且** 圈速 ≈ fps，两个数都要过；屏幕醒睡状态一并记录。
+# 只量在跑的那一份 —— 手工前台跑是另一把尺子（实测 4.2% vs 托管 15~17%）。
+cmd_gate() {
+  local secs="${1:-60}" pid cpu disp probe_rc
+  _installed || { print -u2 "xiaoccctl: 没安装（$PLIST_DST）"; return 3; }
+  pid="$(_pid)"
+  if [[ -z "$pid" ]]; then
+    print "✗ 面板没在跑（job 未加载）。先 start，再门禁；没有进程可量。"
+    return 4
+  fi
+  disp="$(_display_state)"
+  print "== 门槛测量：${secs}s 稳态 / 显示状态：${disp} =="
+  [[ "$disp" == 睡着* ]] && print "⚠️ 屏幕睡着时 CoreAnimation 停画，CPU 会天然偏低 —— 这个数不能跟醒着的臂比"
+  cpu=$(_cpu_pct "$pid" "$secs")
+  print "  CPU：${cpu}%（门槛 <5%）"
+  print "  自证据（圈速必须 ≈ fps，否则「省电」只是被节流）："
+  "$ENTRY" probe 2>&1 | sed 's/^/    | /'
+  probe_rc=${pipestatus[1]:-${PIPESTATUS[0]}}
+  local cpu_ok=0
+  [[ "$("$PY" -c "print(1 if float('${cpu}') < 5.0 else 0)" 2>/dev/null)" == "1" ]] && cpu_ok=1
+  if (( cpu_ok == 1 && probe_rc == 0 )); then
+    print "== 门槛通过：CPU ${cpu}% <5% 且圈速 ≈ fps =="
+    _log "gate: 通过 cpu=${cpu}% probe=0 显示=${disp}"
+    return 0
+  fi
+  print "== 门槛不通过 ==（CPU 达标=${cpu_ok}、自证据退出码=${probe_rc}）"
+  _log "gate: 不通过 cpu=${cpu}% probe=${probe_rc} 显示=${disp}"
+  return 4
+}
+
+# 装回去：start → 暖机 15s（冷启动不计）→ 门禁。**不达标立刻停回去**，不留一个白烧电的进程。
+cmd_arm() {
+  cmd_start || return 4
+  print "暖机 15 秒（冷启动那段不算进入门槛）…"
+  sleep 15
+  if cmd_gate "${1:-60}"; then
+    print "★ 门槛通过，面板留在运行状态"
+    return 0
+  fi
+  print -u2 "✗ 门槛不达标 ⇒ 立刻停回去（不让笔记本白烧电）；修好再 arm"
+  cmd_stop
+  return 4
+}
+
 case "${1:-status}" in
   start)   cmd_start ;;
   stop)    cmd_stop ;;
   restart) cmd_stop || exit 4; cmd_start ;;
   status)  cmd_status ;;
   doctor)  cmd_doctor ;;
+  gate)    shift; cmd_gate "${1:-60}" ;;
+  arm)     shift; cmd_arm "${1:-60}" ;;
   logs)    shift; cmd_logs "${1:-}" ;;
   -h|--help|help)
-    print "用法: xiaoccctl {status|start|stop|restart|doctor|logs [err]}"
+    print "用法: xiaoccctl {status|start|stop|restart|doctor|gate [秒]|arm [秒]|logs [err]}"
+    print "  gate/arm：门槛 = 60s 稳态 CPU <5% 且 圈速 ≈ fps（arm 不达标会自动停回去）"
     print "退出码: 0 正常 / 1 未运行 / 2 用法错 / 3 没装 / 4 操作或自检失败"
     ;;
   *)
