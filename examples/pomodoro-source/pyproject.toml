@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "xiaocc-pomodoro-source"
+version = "0.1.0"
+description = "示例：给小cc 接一个番茄钟状态源"
+requires-python = ">=3.11"
+# 自己的源只依赖 xiaocc 的协议层；开发时用本地源码装（见 docs/sources.md）
+dependencies = ["xiaocc"]
+
+# 这一行就是全部「接入工作」：声明扩展点，核心代码一行不用改
+[project.entry-points."xiaocc.sources"]
+pomodoro = "xiaocc_pomodoro:PomodoroSource"
+
+[tool.setuptools]
+py-modules = ["xiaocc_pomodoro"]
