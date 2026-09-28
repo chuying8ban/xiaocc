@@ -88,7 +88,34 @@ xiaocc run -b appkit --backend-opt at=bottom-left --backend-opt scale=0.8 --back
 位置留白的具体数值由 `window_layout.ANCHOR_MARGIN` / `ANCHOR_TOP_OFFSET` 一处说了算，
 显示层里不要再抄一份常量。
 
-## 5. 踩过的坑（照抄容易，独立踩出来要花一晚上）
+## 5. 窗口位置语义：拖动＝搬家，其余位移＝bug
+
+两种位移必须分开对待，否则用户拖好的位置会被自己的代码弹回去，而真正该管的漂移却没人发现：
+
+| 位移 | 语义 | 处理 |
+| --- | --- | --- |
+| 用户拖动后松手（且没贴边） | **有意搬家** | 写成锚点（内存 + 磁盘一起换）→ 下次启动还停在那儿 |
+| 贴边收起 / 悬停展开 | 临时态 | 改窗口，**不动**锚点（否则「家」会永久变成屏幕边上） |
+| 其它任何位移 | bug | 回锚 + 日志留一行 warning |
+
+* 锚点文件：`~/.xiaocc/anchor.json`（`XIAOCC_ANCHOR_FILE` 可覆盖 —— **测试脚本必须覆盖它**，
+  否则自测拖一下就把用户真实的锚点改了，下次启动桌宠落在屏幕中央）。
+* 起始位置优先级：命令行 `--backend-opt at=…` > 磁盘锚点 > 默认右上角。传了 `at=` 时
+  **不读也不写**磁盘那份（运维说了算）。
+* 所有改窗口位置的地方都走 `_set_window_rect(rect, reason=…)`，`reason` 取
+  `drag` / `collapse` / `expand` / `anchor` / `restore`。裸调 `setFrame` 会让窗口悄悄漂走
+  而日志里什么都没有 —— 运维实测过：启动时 `1324,96`，跑到 3 分钟变成稳定的 `1225,100`
+  （左偏 99px）且自己弹不回来，他在机器外无从判断那是交互还是卡住。
+* 自检每秒一次（`_DRIFT_CHECK_PERIOD`，用**墙钟**判周期，不是「这一圈干了多少活」的时间 ——
+  一圈里大部分时间在 sleep，按干活时间攒要好十几秒才查一次）：非拖动、非贴边态却不在锚点上
+  → 回锚 + `检测到窗口漂移（非拖动）(x,y) → 回到锚点 (x,y)`。
+* 运维/doctor 可 grep 的三种行：`位置变化 [<reason>] (x,y) → (x,y)`、
+  `锚点已更新（用户拖动）: (x,y)`、`检测到窗口漂移（非拖动）…`；
+  `probe()` 里读 `anchor` / `anchor_ok` / `anchor_state`（`anchor` / `drag` / `collapsed` / `drifted`）。
+  **`anchor_ok` 只在「没人碰它却漂在别处」时为 `False`**，拖拽/贴边这些正常交互态都是 `True`，
+  免得 doctor 把交互态误报成故障。
+
+## 6. 踩过的坑（照抄容易，独立踩出来要花一晚上）
 
 | 坑 | 现象 | 正确做法 |
 | --- | --- | --- |
@@ -104,7 +131,7 @@ xiaocc run -b appkit --backend-opt at=bottom-left --backend-opt scale=0.8 --back
 | 拿 `ps %cpu` 单次采样验收 | 分不清「启动那几秒烧的」和「一直在烧」 | 采两次 `ps -o time=` 算差值（或 `resource.getrusage` 前后做差）得到窗口内真实占用 |
 | 直接用真实鼠标做回归测试 | 测试会劫持用户的鼠标，且结果不确定 | 光标来源可注入（`AppKitBackend(cursor=...)`），拖拽用多段平滑位移 |
 
-## 6. 已经有的显示层
+## 7. 已经有的显示层
 
 | 名字 | 平台 | 依赖 | 能力 |
 | --- | --- | --- | --- |
@@ -119,7 +146,7 @@ xiaocc run -b appkit --backend-opt at=bottom-left --backend-opt scale=0.8 --back
 mybackend = "my_pkg.backend:MyBackend"
 ```
 
-## 7. 取证脚本
+## 8. 取证脚本
 
 `scripts/appkit_screenshots.py` 用注入的光标把「拖拽 → 贴边收起 → 悬停展开 → 鼠标离开再收起」
 跑一遍，逐步截图并断言窗口的真实状态（层级、透明、穿透、尺寸、视图是否跟窗口一致）：

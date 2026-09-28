@@ -32,6 +32,7 @@ from ..characters import Character
 from ..engine import Render
 from ..protocol import State
 from . import window_layout as wl
+from .anchor_store import load_anchor, save_anchor
 from .base import Backend
 
 __all__ = ["AppKitBackend"]
@@ -90,6 +91,20 @@ _POSE_PRECISION = 3
 #: 一圈最多消费多少个**就绪**事件：拖拽时鼠标事件成串到达，一次只取一个会跟不上手；
 #: 给个上限是防止极端事件洪水把这一帧拖长。
 _MAX_EVENTS_PER_LOOP = 64
+
+#: 判定「位置真的变了」的阈值（逻辑像素）。低于它就是浮点噪声，不值得打一行日志。
+_MOVE_EPSILON = 0.5
+
+#: 允许「不回锚」的位移理由 —— 只有用户交互算正常位移：拖着走、贴边收起、贴边展开。
+#: 其余理由（``anchor`` = 摆到锚点、``restore`` = 回锚）一旦目标不在锚点上，
+#: 就说明有代码在乱挪窗口，:meth:`AppKitBackend._set_window_rect` 当场改成回锚。
+_ANCHOR_FREE_REASONS = frozenset({"drag", "collapse", "expand"})
+
+#: 漂移自检的容差（逻辑像素）。比 :data:`_MOVE_EPSILON` 松一档，用来吃掉窗口服务器的取整。
+_DRIFT_TOLERANCE = 1.0
+
+#: 漂移自检的节拍（秒）：**累计**够这么久才查一次，不是每帧查 —— 查一次要戳 ObjC 拿真实 frame。
+_DRIFT_CHECK_PERIOD = 1.0
 
 _IMAGE_SUFFIXES = (".png", ".svg", ".pdf", ".tiff", ".jpg", ".jpeg")
 
@@ -198,7 +213,25 @@ class _PetView(NSView):
 class AppKitBackend(Backend):
     """macOS 原生窗口显示层。用法：``xiaocc run --backend appkit``。
 
-    初始位置由 ``--backend-opt at=...`` 控制（默认右上角）。
+    初始位置（= 锚点）的优先级：``--backend-opt at=...`` > 用户上次拖动留下的锚点 >
+    默认右上角。
+
+    位置语义：**谁有权挪窗口**
+    --------------------------
+    窗口位置的变动只有两种性质，必须分开对待：
+
+    * **用户拖动 = 有意搬家**。松手且没贴边时，把新位置落成锚点
+      （``~/.xiaocc/anchor.json``，见 :mod:`xiaocc.backends.anchor_store`），
+      下次启动还停在这儿 —— 绝不自己弹回默认角落。
+    * **除拖动外的一切位移 = bug**。贴边收起/展开是明确的临时态（位置由贴边几何决定，
+      不算搬家、也不改锚点）；其余「窗口不在锚点上」一律当漂移：立刻回锚，并在日志里
+      留下 ``位置变化 [reason] ...`` / ``检测到窗口漂移 ...`` 的痕迹，别悄悄漂走。
+
+    落地方式：所有位移收口到 :meth:`_set_window_rect`，必须报 ``reason``
+    （``drag`` / ``collapse`` / ``expand`` / ``anchor`` / ``restore``）；
+    :meth:`_pump` 里每秒最多一次拿 ``window.frame()`` 的**真实**坐标和锚点对账。
+    锚点文件同时是运维 ``xiaoccctl doctor`` 判断「窗口还在不在该在的地方」的参照，
+    :meth:`probe` 里的 ``anchor`` / ``anchor_ok`` / ``anchor_state`` 就是给它的自证据。
     """
 
     name = "appkit"
@@ -223,6 +256,11 @@ class AppKitBackend(Backend):
             # 取值写错就在**加载阶段**报错：真等到开窗口时才炸，用户看到的只是一个空桌面。
             # 这里只为校验，真正的矩形要等屏幕尺寸和角色画布都已知（见 :meth:`_ensure_window`）。
             wl.parse_anchor(at, wl.Rect(0.0, 0.0, 0.0, 0.0), (0.0, 0.0))
+        #: 锚点来源在这里就定下来（谁说了算），但**矩形**要等屏幕尺寸和角色画布已知才算得出
+        #: （见 :meth:`_initial_rect`）。优先级：① 运维显式传的 ``at=``；② 没传 ``at=`` 时，
+        #: 用户上次拖动落盘的锚点；③ 都没有就默认右上角（与没有锚点机制时的行为一致）。
+        #: 传了 ``at=`` 就不去读磁盘 —— 运维说了算，而且不覆写用户那份。
+        self._saved_anchor: tuple[float, float] | None = None if at is not None else load_anchor()
         #: 注入光标来源 —— 自动化截图/回归脚本用它模拟「鼠标在哪」，正常跑用真实鼠标。
         self._cursor_override = cursor
         self._window: Any = None
@@ -232,6 +270,14 @@ class AppKitBackend(Backend):
         self._frame: Render | None = None
         self._character: Character | None = None
         self._dock = wl.Dock()
+        #: 窗口的「家」（含窗口尺寸）：用户拖动后会更新并落盘（见 anchor_store），
+        #: 其余任何位移都要回到这里。真值在 :meth:`_ensure_window` 里算出，
+        #: 在那之前窗口也还不存在，所以先摆一个和 ``_window_local`` 同款的占位矩形。
+        self._anchor: wl.Rect = wl.Rect(0.0, 0.0, 0.0, 0.0)
+        #: 上次漂移自检的时刻 —— 每 :data:`_DRIFT_CHECK_PERIOD` 查一次（见 :meth:`_pump`）。
+        #: 用**墙钟**而不是「这一圈干了多少活」：主循环一圈里大部分时间在 sleep，
+        #: 按活计时间攒，1 秒的节拍要十几秒才攒够一次自检 —— 漂了却半天没人管。
+        self._last_drift_check = time.monotonic()
         self._dragging = False
         self._drag_offset = (0.0, 0.0)
         self._started = time.monotonic()
@@ -318,7 +364,7 @@ class AppKitBackend(Backend):
         """把窗口挪到屏幕左上角坐标 (x, y) —— 等价于拖拽中的一帧。"""
         size = self._window_size()
         rect = wl.Rect(x, y, *size).clamped_into(self._space().screen)
-        self._set_window_rect(rect)
+        self._set_window_rect(rect, reason="drag")
 
     def start_drag(self) -> None:
         """程序化拖拽的开始（等价于鼠标按下）—— 自动化脚本/回归用。
@@ -332,19 +378,89 @@ class AppKitBackend(Backend):
         self._dragging = True
 
     def end_drag(self) -> wl.Edge:
-        """松手：判定是否贴边收起。返回落在哪条边上。"""
+        """松手：判定是否贴边收起。返回落在哪条边上。
+
+        **没贴边 = 用户有意搬家**：把新位置落成锚点（磁盘 + 内存一起换），下次启动就停在这儿，
+        漂移自检也以这儿为准。贴边收起不算搬家 —— 那是临时态，把手条收起/展开都不该改锚点，
+        否则用户把桌宠拖到边上收起来一次，「家」就永久变成屏幕边上了。
+        """
         self._dragging = False
         body = self._body_in_screen()
         edge = self._dock.drop(body, self._space().screen, distance=self.snap_distance)
         if edge is not wl.Edge.NONE:
-            self._set_window_rect(wl.collapsed_rect(edge, self._space().screen, body))
+            self._set_window_rect(
+                wl.collapsed_rect(edge, self._space().screen, body), reason="collapse"
+            )
+        else:
+            self._save_anchor_from_window()
         return edge
+
+    def _at_anchor(self, *, tolerance: float = 1.0) -> bool:
+        """窗口**真实**frame 是否还压在锚点上（拿窗口服务器那份，不看自己记的簿）。
+
+        比自己记的坐标可靠：判据来自 ``self._window.frame()``，外部（脚本、窗口服务器）
+        挪过窗口也能发现 —— 这正是「漂走了却没人知道」的那条缝。
+        """
+        if self._window is None:
+            return True
+        origin = self._window.frame().origin
+        want = self._space().to_ns_rect(self._anchor).origin
+        return abs(origin.x - want.x) <= tolerance and abs(origin.y - want.y) <= tolerance
+
+    def _anchor_relation(self) -> tuple[str, bool]:
+        """窗口现在与锚点是什么关系 —— ``(anchor_state, anchor_ok)``，给 :meth:`probe` 用。
+
+        ``anchor_ok`` 只在**没人碰它却漂在别处**时为 ``False``：拖拽中、贴边收起（把手条）、
+        从把手条展开的贴边态都算正常交互态，否则运维的 doctor 会把正常交互误报成故障。
+        """
+        if self._dragging:
+            return "drag", True
+        if self._handle_shown or self._dock.docked:
+            return "collapsed", True
+        if self._at_anchor():
+            return "anchor", True
+        return "drifted", False
+
+    def _check_drift(self) -> None:
+        """每秒一次的纠偏（``_pump`` 里调）：没人拖动、也不在贴边态，窗口却不在锚点上 → 回锚 + 留痕。
+
+        运维实测过这种漂：启动瞬间 ``1324,96``，跑到约 3 分钟后外部抓到稳定的 ``1225,100``
+        （左偏 99px）且自己弹不回来，而位置变化**不留痕**，他在机器外没法判断是正常交互还是卡住。
+        所以这里既要把窗口拽回锚点，也要往日志里写一行到底漂了多少。
+        """
+        if self._window is None or self._dragging or self._dock.docked or self._handle_shown:
+            return
+        if self._at_anchor():
+            return
+        current = self._space().to_local_rect(self._window.frame())
+        log.warning(
+            "检测到窗口漂移（非拖动）(%d,%d) → 回到锚点 (%d,%d)",
+            current.x, current.y, self._anchor.x, self._anchor.y,
+        )
+        self._set_window_rect(self._anchor, reason="restore")
+
+    def _save_anchor_from_window(self) -> bool:
+        """把窗口当前左上角落成锚点：内存里的「正确答案」和磁盘上那份一起换。
+
+        内存那份必须同步换，否则下一秒漂移自检就会拿旧锚点把用户刚拖好的窗口拽回去。
+        """
+        rect = self._window_local
+        self._anchor = rect
+        if save_anchor(rect.x, rect.y):
+            log.info("锚点已更新（用户拖动）: (%d,%d)", rect.x, rect.y)
+            return True
+        # 写不进磁盘不许静默：那意味着重启之后桌宠会弹回旧位置，用户只会觉得「我明明拖过去了」。
+        log.warning(
+            "锚点写盘失败（磁盘/权限？）: (%d,%d) 只在这次运行里有效", rect.x, rect.y
+        )
+        return False
 
     def probe(self) -> dict[str, Any]:
         """当前窗口的真实状态 —— 自动化证据用，别拿设计文档当结果。"""
         if self._window is None:
             return {"window": None}
         frame = self._window.frame()
+        anchor_state, anchor_ok = self._anchor_relation()
         info: dict[str, Any] = {
             "window_number": int(self._window.windowNumber()),
             "visible": bool(self._window.isVisible()),
@@ -361,6 +477,15 @@ class AppKitBackend(Backend):
             ],
             "dock": self._dock.state,
             "edge": str(self._dock.edge),
+            #: —— 位置语义的自证据：窗口现在和锚点是什么关系（运维 doctor 就看这三个）——
+            #: 锚点的屏幕左上角坐标：用户拖动会更新它，其余任何位移都该回到它。
+            "anchor": [round(self._anchor.x, 1), round(self._anchor.y, 1)],
+            #: True = 在锚点上，或正处于拖拽/贴边这类**正常交互态**；
+            #: False = 没人碰它却漂在别处（就是运维记录里那种「窗口漂走且不回锚点」）。
+            "anchor_ok": anchor_ok,
+            #: 四选一：``anchor``（在锚点）/ ``drag``（正被拖）/ ``collapsed``（贴边态 ——
+            #: 收起的把手条、或从把手条展开的完整角色，细分看上面的 ``dock``）/ ``drifted``（漂了）。
+            "anchor_state": anchor_state,
             "art": self._last_art,
             #: 实际画上去的文案（不是引擎的那份原文）—— 待机时应当为空
             "caption_drawn": self._last_caption_drawn,
@@ -415,7 +540,8 @@ class AppKitBackend(Backend):
         app.setActivationPolicy_(NSApplicationActivationPolicyAccessory)  # 不占 Dock、不抢焦点
         space = self._space()
         width, height = self._window_size()
-        start = wl.parse_anchor(self._at, space.screen, (width, height))
+        start = self._initial_rect(space, width, height)
+        self._anchor = start
         ns_rect = space.to_ns_rect(start)
 
         panel = NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -450,8 +576,46 @@ class AppKitBackend(Backend):
         self._last_fingerprint = None  # 新窗口 = 画面从零开始，第一帧必须真画
         log.info("AppKit 窗口就绪：%sx%s @ %s", width, height, start)
 
-    def _set_window_rect(self, rect: wl.Rect) -> None:
+    def _initial_rect(self, space: _Space, width: float, height: float) -> wl.Rect:
+        """窗口初始位置 —— 优先级：命令行 ``at=`` > 落盘的锚点 > 默认右上角。
+
+        用户拖动是**有意搬家**，所以那个位置会落盘（``~/.xiaocc/anchor.json``），下次启动
+        还停在那儿；命令行显式给了 ``at=`` 就听命令行的（运维说了算），但不覆写磁盘上的锚点。
+        """
+        if self._saved_anchor is not None:
+            rect = wl.Rect(*self._saved_anchor, width, height).clamped_into(space.screen)
+            log.info("按上次拖动的锚点启动：(%d,%d)", rect.x, rect.y)
+            return rect
+        return wl.parse_anchor(self._at, space.screen, (width, height))
+
+    def _set_window_rect(self, rect: wl.Rect, *, reason: str) -> None:
+        """**所有**改窗口位置的地方都走这里，便于留痕与纠偏。
+
+        ``reason`` 取 ``drag`` / ``collapse`` / ``expand`` / ``anchor`` / ``restore``：
+        前三个是正常位移（拖动、贴边收起、贴身展开），后两个是「锚点本身」与「回锚」。
+        除了这三个正常位移，任何偏离锚点的位置都当成 bug —— 直接改成回锚并写一行 warning。
+        裸调 ``setFrame`` 会让窗口悄悄漂走而日志里什么都没有（运维实测过：跑到 3 分钟时
+        窗口稳定停在 `1225,100`，比锚点左偏 99px，原因无从查起）。
+        """
         assert self._window is not None
+        anchor = self._anchor
+        off_anchor = abs(rect.x - anchor.x) > 0.5 or abs(rect.y - anchor.y) > 0.5
+        if anchor is not None and reason not in _ANCHOR_FREE_REASONS and off_anchor:
+            log.warning(
+                "位置偏离锚点，回锚：[%s] 想放到 (%d,%d)，锚点 (%d,%d)，偏离 (%+d,%+d)",
+                reason, rect.x, rect.y, anchor.x, anchor.y,
+                round(rect.x - anchor.x), round(rect.y - anchor.y),
+            )
+            rect, reason = anchor, "restore"
+        moved = (
+            abs(rect.x - self._window_local.x) > 0.5
+            or abs(rect.y - self._window_local.y) > 0.5
+        )
+        if moved:
+            log.info(
+                "位置变化 [%s] (%d,%d) → (%d,%d)",
+                reason, self._window_local.x, self._window_local.y, rect.x, rect.y,
+            )
         self._window.setFrame_display_(self._space().to_ns_rect(rect), True)
         self._window_local = rect
 
@@ -492,6 +656,11 @@ class AppKitBackend(Backend):
             changed = self._poll()
             self._paint(force=changed)
             self._count_loop()
+            # 漂移自检每秒最多一次（别每帧拿 frame() 去问窗口服务器）
+            now = time.monotonic()
+            if now - self._last_drift_check >= _DRIFT_CHECK_PERIOD:
+                self._last_drift_check = now
+                self._check_drift()
             # 帧预算的余量睡掉（不超过本次 _pump 的截止时间）—— 这一句就是限速器
             nap = min(budget - (time.monotonic() - frame_start), deadline - time.monotonic())
             slept = 0.0
@@ -586,8 +755,9 @@ class AppKitBackend(Backend):
         edge = self._dock.edge
         center = strip.center.y if edge in (wl.Edge.LEFT, wl.Edge.RIGHT) else strip.center.x
         self._set_window_rect(
-            wl.docked_rect(edge, self._space().screen, self._window_size(), center=center)
-        )
+                wl.docked_rect(edge, self._space().screen, self._window_size(), center=center),
+                reason="expand",
+            )
 
     def _poll(self) -> bool:
         """命中判定 + 收起/展开。返回**这一圈是否有变化**（变了就得强制重画一帧）。"""
@@ -603,7 +773,9 @@ class AppKitBackend(Backend):
         if action is wl.DockAction.COLLAPSE:
             assert self._character is not None
             body = self._body_in_screen()
-            self._set_window_rect(wl.collapsed_rect(self._dock.edge, self._space().screen, body))
+            self._set_window_rect(
+                wl.collapsed_rect(self._dock.edge, self._space().screen, body), reason="collapse"
+            )
             log.debug("贴边收起：%s", self._dock.edge)
             changed = True
         elif action is wl.DockAction.EXPAND:

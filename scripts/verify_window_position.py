@@ -15,9 +15,11 @@
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -26,6 +28,13 @@ import Quartz
 ROOT = Path(__file__).resolve().parents[1]
 PY = str(ROOT / ".venv/bin/python")
 SCREEN_W, SCREEN_H = 1512.0, 982.0
+
+#: 把锚点文件指到一个**不存在的**路径：这个脚本验的是 `at=`/默认角的算术，
+#: 而用户拖动会把锚点落盘（见 scripts/verify_anchor.py），残留的锚点文件会让
+#: 「默认右上角」那一例随机失败 —— 那不是回归，是测试自己没隔离。
+ANCHOR_ENV = {**os.environ, "XIAOCC_ANCHOR_FILE": str(Path(tempfile.gettempdir()) / "xiaocc-verify-no-anchor.json")}
+for _stale in (ANCHOR_ENV["XIAOCC_ANCHOR_FILE"],):
+    Path(_stale).unlink(missing_ok=True)
 
 #: (说明, 文件名用的 slug, 附加参数, 期望退出码, 期望布局左上角)
 CASES: list[tuple[str, str, list[str], int, tuple[float, float] | None]] = [
@@ -74,7 +83,7 @@ def _run_window_case(case, capture: bool):
 
     if want_code != 0:                        # 错误路径：跑完拿退出码和提示语
         proc = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True,
-                              timeout=60, check=False)
+                              timeout=60, check=False, env=ANCHOR_ENV)
         text = (proc.stderr or "") + (proc.stdout or "")
         lines = [line for line in text.strip().splitlines() if line.strip()]
         msg = next((line for line in lines if "选项" in line or "停靠点" in line), "")
@@ -82,7 +91,7 @@ def _run_window_case(case, capture: bool):
         return ok, f"exit={proc.returncode} · {msg.strip()[:96]}"
 
     proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.PIPE,
-                            stderr=subprocess.STDOUT, text=True)
+                            stderr=subprocess.STDOUT, text=True, env=ANCHOR_ENV)
     time.sleep(2.0)                           # 等窗口上屏
     ours = _sample_ours(proc.pid)
     # 抓图必须在进程还活着的时候做：窗口一销毁，CGWindowListCreateImage 只会返回 None
