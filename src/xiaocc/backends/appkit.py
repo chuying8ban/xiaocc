@@ -395,7 +395,7 @@ class AppKitBackend(Backend):
             self._save_anchor_from_window()
         return edge
 
-    def _at_anchor(self, *, tolerance: float = 1.0) -> bool:
+    def _at_anchor(self, *, tolerance: float = _DRIFT_TOLERANCE) -> bool:
         """窗口**真实**frame 是否还压在锚点上（拿窗口服务器那份，不看自己记的簿）。
 
         比自己记的坐标可靠：判据来自 ``self._window.frame()``，外部（脚本、窗口服务器）
@@ -572,6 +572,9 @@ class AppKitBackend(Backend):
         panel.orderFrontRegardless()  # 不激活 app 也能显示
         self._window, self._view = panel, view
         self._window_local = start
+        # 开窗口的第一下也走同一个闸（reason=anchor）：万一 AppKit 把 create 时给的 frame
+        # 动了（约束/取整），这里会把它按回锚点，而不是让窗口从第一秒起就和锚点对不上。
+        self._set_window_rect(start, reason="anchor")
         self._started = time.monotonic()
         self._last_fingerprint = None  # 新窗口 = 画面从零开始，第一帧必须真画
         log.info("AppKit 窗口就绪：%sx%s @ %s", width, height, start)
@@ -599,17 +602,20 @@ class AppKitBackend(Backend):
         """
         assert self._window is not None
         anchor = self._anchor
-        off_anchor = abs(rect.x - anchor.x) > 0.5 or abs(rect.y - anchor.y) > 0.5
-        if anchor is not None and reason not in _ANCHOR_FREE_REASONS and off_anchor:
+        off_anchor = (
+            abs(rect.x - anchor.x) > _MOVE_EPSILON or abs(rect.y - anchor.y) > _MOVE_EPSILON
+        )
+        if reason not in _ANCHOR_FREE_REASONS and off_anchor:
             log.warning(
                 "位置偏离锚点，回锚：[%s] 想放到 (%d,%d)，锚点 (%d,%d)，偏离 (%+d,%+d)",
                 reason, rect.x, rect.y, anchor.x, anchor.y,
                 round(rect.x - anchor.x), round(rect.y - anchor.y),
             )
+            # 就地改目标和理由，**不递归调用自己** —— 递归只会把一次纠偏打成两层日志。
             rect, reason = anchor, "restore"
         moved = (
-            abs(rect.x - self._window_local.x) > 0.5
-            or abs(rect.y - self._window_local.y) > 0.5
+            abs(rect.x - self._window_local.x) > _MOVE_EPSILON
+            or abs(rect.y - self._window_local.y) > _MOVE_EPSILON
         )
         if moved:
             log.info(
@@ -755,9 +761,9 @@ class AppKitBackend(Backend):
         edge = self._dock.edge
         center = strip.center.y if edge in (wl.Edge.LEFT, wl.Edge.RIGHT) else strip.center.x
         self._set_window_rect(
-                wl.docked_rect(edge, self._space().screen, self._window_size(), center=center),
-                reason="expand",
-            )
+            wl.docked_rect(edge, self._space().screen, self._window_size(), center=center),
+            reason="expand",
+        )
 
     def _poll(self) -> bool:
         """命中判定 + 收起/展开。返回**这一圈是否有变化**（变了就得强制重画一帧）。"""
