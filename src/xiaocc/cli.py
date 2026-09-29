@@ -114,6 +114,10 @@ def _cmd_probe() -> int:
     为什么非看两个数不可：**CPU 低有两种可能** —— 真的省，或者被节流了（画面其实在卡）。
     ``ps`` 只给得出前者；圈速只有进程内知道，所以「圈速 ≈ fps」这条必须从这份文件断言：
     圈速远低于 fps = 被节流，远高于 fps = 又退回忙等，两种都不算达标。
+
+    顺带读那四个 ``state_*`` 字段：状态**该退档没退**（保鲜期早过了还挂在桌面上）说明源把时间戳
+    写坏了（典型是把毫秒当秒写进 ``at``，事件于是永不过期）。这条**只提示、不改判** ——
+    退出码的判据始终是「快照新鲜、圈速 ≈ fps、窗口在锚点上」，doctor / CI 的断言不受影响。
     """
     target = _probe_file()
     try:
@@ -139,6 +143,50 @@ def _cmd_probe() -> int:
           f"  状态={info.get('state')}")
     print(f"锚点={info.get('anchor')}  关系={info.get('anchor_state')}  在锚点={info.get('anchor_ok')}")
     print(f"文案={info.get('caption_drawn')!r}")
+
+    # —— 状态新鲜度的自证据：运维判「状态该退档没退 ⇒ 画面卡在一个状态」就看这两行 ——
+    # 四个字段都可能是 null：窗口已建但引擎还没推来第一帧，或这份快照出自太老的显示层。
+    def _num(value: Any) -> float | None:
+        """JSON 里的数 —— 手工造的自证据可能写成 null/字符串，取不到数就返回 None，别炸。"""
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    state_at = _num(info.get("state_at"))          # 源给的事件时刻（不是快照落盘时刻）
+    state_age = _num(info.get("state_age_s"))      # 写盘那一刻这条事件有多旧
+    state_ttl = _num(info.get("state_ttl_s"))      # None = 不过期（idle/offline）
+    grace = 5.0                                    # 容差与运维 doctor 一致：5s 内算正常抖动
+
+    source = info.get("state_source")
+    if state_age is None:
+        print(f"状态源={source or '（还没有帧）'} 状态时间=（无）"
+              "（这份快照里没有 state_age_s —— 显示层太老？）")
+    elif state_ttl is None:  # idle/offline 本来就不过期，多久都不算卡
+        print(f"状态源={source} 状态时间={state_age:.1f}s 前（保鲜期 不过期）")
+    else:
+        verdict = "该退档没退" if state_age > state_ttl else "还新鲜"
+        print(f"状态源={source} 状态时间={state_age:.1f}s 前"
+              f"（保鲜期 {state_ttl:g}s；{verdict}）")
+
+    # 一条警告行，**不参与退出码**（不进 reasons）：保鲜期为 null 时永远别报 —— idle/offline
+    # 不过期，「状态老了」在它身上不是病；而给未来时间戳的源报出来的状态必然带 TTL
+    # （事件不过期 ⇒ 引擎不会把它降档成 idle），所以这一挡不会漏掉真正的毫秒坑。
+    snapshot_at = _num(info.get("at"))
+    stuck: list[str] = []
+    if state_ttl is not None:
+        if state_age is not None and state_age > state_ttl + grace:
+            stuck.append(
+                f"状态已 {state_age:.1f}s，超过保鲜期 {state_ttl:g}s + {grace:.0f}s 容差"
+                f"（画面卡在「{info.get('state')}」上没退档）"
+            )
+        if state_at is not None and snapshot_at is not None and state_at > snapshot_at + grace:
+            stuck.append(
+                f"源给的时间戳比快照落盘还超前 {state_at - snapshot_at:,.0f}s"
+                "（典型病因：把毫秒当秒写进 at ⇒ 事件永不过期）"
+            )
+    if stuck:
+        print("⚠️ 状态可能卡住/事件永不过期：" + "；".join(stuck))
 
     reasons: list[str] = []
     if not info.get("alive"):
