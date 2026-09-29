@@ -46,8 +46,9 @@ def default_consoles() -> list[ConsoleOnlyAdapter]:
             "dashscope",
             "百炼 DashScope",
             "https://bailian.console.aliyun.com/",
-            "per-key 无余额接口（/usage、/quota、/user/balance 等 7 条路径实测 404）；"
-            "账户级余额需 BSS AK/SK 签名，且账户总额度≠百炼套餐余量",
+            # 面板一行放不下：依据（7 条候选路径实测 404、账户级余额要 BSS 签名、总额度≠套餐余量）
+            # 都在 docs/quota.md，这里只留结论。
+            "per-key 无余额接口（官方不提供）· 账户级余额需 BSS 签名",
         ),
         ConsoleOnlyAdapter(
             "nous",

@@ -37,7 +37,9 @@ BINARY = "qianwen"
 CREDENTIAL_DIR = Path.home() / ".qianwen"
 CONSOLE_URL = "https://platform.qianwenai.com/"
 #: 这句会**原样上屏**（面板是静态 HTML，不跑 Markdown）⇒ 不许带反引号/星号，用「」。
-LOGIN_HINT = "跑一次「qianwen auth login」（浏览器批准一次即可）"
+#: 面板上只放「一个动作」，一行放得下 —— 宽度预算是真机量出来的（这条原来 68px 溢出被截断）。
+#: 「浏览器批准一次即可」这类说明、以及各家取不到数的依据，见 `docs/quota.md`。
+LOGIN_HINT = "qianwen auth login"
 
 #: **叶子命令**：``subscription`` 是命令组，光敲它会打印帮助并 exit 0（不是数据）
 SUBSCRIPTION_ARGS = ("subscription", "status", "--plan", "token", "--format", "json")
@@ -233,7 +235,7 @@ class QwenTokenPlanAdapter:
         except FileNotFoundError:
             return self._result(
                 STATE_UNKNOWN,
-                detail=f"未安装官方 CLI「{self._binary}」；装好后 {LOGIN_HINT}",
+                detail=f"未装官方 CLI「{self._binary}」· 登录：{LOGIN_HINT}",
             )
         except Exception as exc:  # noqa: BLE001 - 采集器不许抛
             return self._result(STATE_ERROR, detail=error_detail(exc, 120))
@@ -243,9 +245,9 @@ class QwenTokenPlanAdapter:
         if "AUTH_REQUIRED" in out or rc == 2:
             if self._logged_in():
                 return self._result(
-                    STATE_STALE, detail=f"凭据被拒（AUTH_REQUIRED）—— 重新登录：{LOGIN_HINT}"
+                    STATE_STALE, detail=f"凭据被拒 · 重新登录：{LOGIN_HINT}"
                 )
-            return self._result(STATE_UNKNOWN, detail=f"未登录：{LOGIN_HINT}")
+            return self._result(STATE_UNKNOWN, detail=f"未登录（{LOGIN_HINT}）")
         if rc != 0:
             return self._result(STATE_ERROR, detail=f"CLI 退出码 {rc}")
 

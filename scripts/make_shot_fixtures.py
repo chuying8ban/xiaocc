@@ -81,7 +81,7 @@ DEMO_QUOTA = {
             "console": "https://bailian.console.aliyun.com/",
             "source": "",
             "fetched_at": "2026-09-30T00:00:00+08:00",
-            "detail": "未安装官方 CLI「qianwen」；装好后 跑一次「qianwen auth login」（浏览器批准一次即可）",
+            "detail": "未装官方 CLI「qianwen」· 登录：qianwen auth login",
         },
         {
             "id": "dashscope",
@@ -92,7 +92,7 @@ DEMO_QUOTA = {
             "console": "https://bailian.console.aliyun.com/",
             "source": "",
             "fetched_at": "2026-09-30T00:00:00+08:00",
-            "detail": "per-key 无余额接口（/usage、/quota、/user/balance 等 7 条路径实测 404）",
+            "detail": "per-key 无余额接口（官方不提供）· 账户级余额需 BSS 签名",
         },
         {
             "id": "nous-portal",
@@ -104,6 +104,7 @@ DEMO_QUOTA = {
             "source": "",
             "fetched_at": "2026-09-30T00:00:00+08:00",
             "detail": "无公开额度接口；本机 credential_pool.nous 为空 ⇒ 需登录后看 Credits",
+            # 备注：这条未溢出（实测横向 0px），保留原文
         },
     ],
 }

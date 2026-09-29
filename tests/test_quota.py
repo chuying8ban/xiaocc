@@ -402,7 +402,10 @@ def test_qwen_auth_required_is_stale_when_credentials_exist(tmp_path: Path):
     quota = adapter.fetch(QuotaContext(env={}, state_dbs=[]))
     assert quota.state == "stale"
     assert quota.items == []  # 陈旧也不许编数
-    assert "AUTH_REQUIRED" in (quota.detail or "")
+    # 面板那行只放「结论 + 一个动作」：诊断码 `AUTH_REQUIRED` 归代码/文档，不进用户可见字符串
+    # （实测这条原来横向溢出 68px、在真机上被截成半句）。但"能分清是凭据被拒、不是未登录"要保住。
+    assert "凭据被拒" in (quota.detail or "")
+    assert "qianwen auth login" in (quota.detail or "")  # 动作必须在，不然用户不知道怎么修
 
 
 def test_qwen_never_logged_in_is_unknown(tmp_path: Path):
