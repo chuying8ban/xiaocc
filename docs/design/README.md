@@ -61,6 +61,17 @@
 **设备那几行是拍摄机的真实读数**（CPU/内存/磁盘/电池没有替身缝），不含身份信息。
 「含桌面像素=否」这一列只对这 13 张负责断言 —— 历史图那列留空，不猜。
 
+**这些图怎么重拍的**（可复现）：
+```bash
+.venv/bin/python scripts/make_shot_fixtures.py --out "$HOME/.xiaocc-shots" --hermes-dir "$HOME/.hermes-demo"
+.venv/bin/python scripts/shoot_design_shots.py --out docs/design --evidence "$HOME/.xiaocc-shots/design-shots.evidence.json"
+```
+第一条造替身数据（假额度报告 / 假账本，四个沙箱缝指过去）；第二条开真窗口逐张拍，并在落盘前
+对每张做三件事：**几何**（取景框必须落在衬底内）、**像素**（`bright_px == 0`、`colors ≤ 4`）、
+**红线**（落盘文本里不许出现本机家目录绝对路径）。拍法字段 `how` 由抓图路径自己盖，
+`window` = 只抓窗口本体、`window-composite` = 抓窗口再合成到中性底（**右键菜单与贴边把手条走这条，
+因为它们只能叠在桌面上，而桌面内容不许进公开仓库**）。
+
 ### 二、设计阶段稿（保留，判断方向与版式用）
 
 | 文件 | 内容 | 状态 | 含桌面像素 |
