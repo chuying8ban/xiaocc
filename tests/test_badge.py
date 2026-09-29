@@ -6,7 +6,12 @@
 
 from __future__ import annotations
 
-from xiaocc.quota.badge import STALE_AGE_S, badge_candidates, badge_text
+from xiaocc.quota.badge import (
+    STALE_AGE_S,
+    badge_bubble_candidates,
+    badge_candidates,
+    badge_text,
+)
 
 
 def report(*services: dict) -> dict:
@@ -62,6 +67,25 @@ def test_first_ok_service_wins_and_units_are_mapped() -> None:
     assert badge_text(rep, ok_meta(30.0)).startswith("DeepSeek ¥12.50")
 
 
-def test_unknown_unit_is_not_guessed() -> None:
+def test_unknown_unit_goes_after_the_number() -> None:
+    """认不出货币就**后置**：`credits5.00` 既没空格也没符号，是字面 bug（@writer 抓的）。
+
+    千问云 Token Plan 的 `Credits` 一登录就是主家，DeepSeek 的 CNY→¥ 一直把这条盖着。
+    """
     rep = report(service("某家", "ok", {"value": 5.0, "unit": "credits"}))
-    assert badge_text(rep, ok_meta(30.0)).startswith("某家 credits5.00")
+    assert badge_text(rep, ok_meta(30.0)).startswith("某家 5.00 credits")
+
+
+def test_known_currency_still_uses_the_symbol() -> None:
+    rep = report(service("DeepSeek", "ok", {"value": 5.0, "unit": "CNY"}))
+    assert badge_text(rep, ok_meta(30.0)).startswith("DeepSeek ¥5.00")
+
+
+def test_credits_bubble_lines_stay_readable() -> None:
+    """@writer 量的字面（11pt 真字体、气泡每行上限 153px）：`Credits1200.00 · 9 分钟前`
+    拆两行后每行都读得完，第一行不许断在半句话中间。"""
+    rep = report(service("千问云 Token Plan", "ok", {"value": 1200.0, "unit": "Credits"}))
+    lines = badge_bubble_candidates(rep, ok_meta(540.0))[0]
+    assert len(lines) == 2
+    assert lines[0] == "千问云 Token Plan"
+    assert lines[1] == "1200.00 Credits · 9 分钟前"

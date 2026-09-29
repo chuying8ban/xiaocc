@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from .. import device as device_mod
 from ..quota import DEFAULT_QUOTA_PATH
 from ..quota.store import load as load_quota
 from .paths import DEFAULT_PROBE_PATH
@@ -55,6 +56,22 @@ PET_FIELDS = (
 )
 
 
+#: 面板进程自己那份设备采样器（面板和桌宠是两个进程，各采各的）。
+#: **在模块导入时就建**：CPU 利用率是两个累计 tick 的差商，基线越早抓、第一次渲染时
+#: 的窗口就越长（建在渲染那一刻的话窗口 <0.5s，CPU 只能写「未取到」——打开面板看不到 CPU）。
+#: 每次渲染 `fresh=True` 现采，所以看到的一定是「刚才这一刻」的数。
+_DEVICE_SAMPLER = device_mod.Sampler()
+
+
+def _device_block() -> dict[str, Any]:
+    """设备状态（CPU / 内存 / 磁盘 / 电池 / 已开机）。**采不到就空着**，页面写「未取到」。"""
+    try:
+        dev = _DEVICE_SAMPLER.get(fresh=True)
+    except (OSError, ValueError):  # 页面渲染不许被设备采集带崩
+        return {"rows": [], "sampled_at": None}
+    return {"rows": [[title, value] for title, value in dev.lines()], "sampled_at": dev.taken_at}
+
+
 def _pet_snapshot(probe_path: Path) -> dict[str, Any]:
     """读桌宠自证据的**白名单子集**。文件不在/坏了 ⇒ 返回 ``{"alive": False}``，不抛。
 
@@ -81,7 +98,7 @@ def build_payload(
 ) -> dict[str, Any]:
     """组装页面数据。**取不到就是取不到** —— 这里不补 0、不编数。"""
     from .. import settings as settings_store
-    from ..quota.badge import badge_text
+    from ..quota.badge import badge_bubble_candidates
     from ..quota.base import now_iso as _now_iso
 
     report, meta = load_quota(Path(quota_path))
@@ -91,6 +108,7 @@ def build_payload(
         "rendered_at": now_iso or _now_iso(),
         "quota": {"meta": meta, "report": report or {}},
         "pet": _pet_snapshot(Path(probe_path)),
+        "device": _device_block(),
         "settings": {
             "path": str(settings_path or settings_store.settings_path()),
             "schema": described.get("schema", 1),
@@ -98,9 +116,10 @@ def build_payload(
             "actions": list(settings_store.CLICK_ACTIONS),
             "labels": dict(settings_store.CLICK_ACTION_LABELS),
             "problems": described.get("problems") or [],
-            # 预览用**单行**那套口径（同一份报告、同一套陈旧判据）——面板说陈旧、气泡还在报数
-            # 就是自相矛盾，所以预览与气泡必须同源
-            "bubble_preview": badge_text(report, meta),
+            # 预览必须跟气泡**同一个函数、同一种形态**：气泡是两行（badge_bubble_candidates
+            # 挑出来的候选），拿单行那套 badge_text() 去显示就会出现「面板说会写 X、气泡只写了
+            # X 的一半」——千问云那条单行量出来 230px，一行根本画不下。同源 + 同形态两条都要。
+            "bubble_preview": list(badge_bubble_candidates(report, meta)[0]),
         },
     }
 

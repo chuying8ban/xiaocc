@@ -422,10 +422,19 @@ def check_click_gestures(backend, number: int, cursor: list) -> None:
     )
     menu = backend._build_menu()
     titles = [str(menu.itemAtIndex_(i).title()) for i in range(menu.numberOfItems())]
+    device_rows = [t for t in titles if t != "" and t != "打开控制面板"]
     _check(
-        "⑯右键菜单只剩「打开控制面板」一条（用户明确不要菜单里的显示额度；设置已并进面板）",
-        titles == ["打开控制面板"],
+        "⑯右键菜单：**上面是设备状态**（CPU/内存/磁盘…），最后一条才是「打开控制面板」",
+        titles[-1] == "打开控制面板"
+        and any(t.startswith("CPU") for t in titles)
+        and any(t.startswith("内存") for t in titles)
+        and any(t.startswith("磁盘") for t in titles),
         f"菜单条目={titles}",
+    )
+    _check(
+        "㉖菜单里的数就是采样器现采的数（菜单放陈旧数字比不放更糟）",
+        device_rows == [f"{t}  {val}" for t, val in backend._device.get().lines()],
+        f"菜单={device_rows[:2]}…",
     )
     backend._open_panel()
     backend.linger(0.05)

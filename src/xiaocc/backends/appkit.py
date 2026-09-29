@@ -32,6 +32,7 @@ from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from .. import device
 from .. import settings as settings_store
 from ..characters import Character
 from ..engine import Render
@@ -300,6 +301,10 @@ class _MenuTarget(NSObject):
     def openPanel_(self, _sender):
         self._backend._open_panel()
 
+    def noop_(self, _sender):
+        """设备状态那几行挂着它：**要 enabled 才是正常黑字**（disabled 会灰掉，像坏了），
+        点了什么也不做，只把菜单收起来。"""
+
 class AppKitBackend(Backend):
     """macOS 原生窗口显示层。用法：``xiaocc run --backend appkit``。
 
@@ -417,6 +422,8 @@ class AppKitBackend(Backend):
         self._paints_window_start = self._started
         self._paints_per_sec = 0.0
         self._menu_target: Any = None
+        #: 设备状态采样器（右键菜单要弹时现问一次，TTL 缓存；不进 UI 循环）
+        self._device = device.Sampler()
         #: 光标当前是否落在热区 —— 由 :meth:`_poll` 维护，指纹要用
         self._cursor_hot = False
         #: 事件循环的自证据：本秒累计圈数 / 上一秒结算出的圈速 / 上一圈真正睡了多久
@@ -1385,15 +1392,38 @@ class AppKitBackend(Backend):
         log.info("右键菜单已弹出（%s 条）", menu.numberOfItems())
 
     def _build_menu(self) -> Any:
-        """把右键菜单搭出来（单独一个方法，判据才能数条目、而不用真去点模态菜单）。"""
+        """把右键菜单搭出来（单独一个方法，判据才能数条目、而不用真去点模态菜单）。
+
+        用户 2026-09-29 要求「右键小cc显示设备状态」⇒ 上半是设备数据，下半是动作。
+        数字**每次右键现采**（:class:`~xiaocc.device.Sampler`，TTL 缓存 2s）——
+        菜单里放陈旧数字比不放更糟。
+        """
         menu = NSMenu.alloc().init()
         if self._menu_target is None:
             self._menu_target = _MenuTarget.alloc().initWithBackend_(self)
-        for title, selector in (("打开控制面板", b"openPanel:"),):
-            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
+        for title, value in self._device_rows():
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(
+                f"{title}  {value}", b"noop:", ""
+            )
             item.setTarget_(self._menu_target)
             menu.addItem_(item)
+        menu.addItem_(NSMenuItem.separatorItem())
+        item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("打开控制面板", b"openPanel:", "")
+        item.setTarget_(self._menu_target)
+        menu.addItem_(item)
         return menu
+
+    def _device_rows(self) -> list[tuple[str, str]]:
+        """设备状态行（CPU / 内存 / 磁盘 / 电池 / 已开机）。采不到写「未取到」，不补数。
+
+        采样放在**右键那一刻**：这里不在每帧的循环里，采样器自己还有 TTL 缓存，
+        所以常态下右键一次只多花一次 ``vm_stat`` + ``pmset``（~20ms）。
+        """
+        try:
+            return self._device.get().lines()
+        except Exception:  # 采不到也不许把右键菜单带走
+            log.exception("设备状态采样失败")
+            return [("设备状态", "未取到")]
 
     def _open_panel(self) -> None:
         """打开控制面板；已经开着就刷新并抬到前面。

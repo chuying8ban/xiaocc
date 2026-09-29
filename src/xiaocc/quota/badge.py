@@ -15,6 +15,17 @@ from typing import Any
 #: 单位 → 符号（认不出就用原单位，绝不猜）
 _SYMBOLS = {"CNY": "¥", "RMB": "¥", "USD": "$", "US$": "$"}
 
+
+def _money(value: Any, unit: str) -> str:
+    """金额 + 单位。**认得出货币才把符号前置**，认不出就后置成「1200.00 Credits」。
+
+    认不出还硬拼会写出 `Credits1200.00` 这种既没空格也没符号的怪字——DeepSeek 的
+    CNY→¥ 让这条一直看不出来，千问云 Token Plan 一登录它就是主家，字面 bug 立刻现形。
+    """
+    symbol = _SYMBOLS.get(unit.upper()) if unit else None
+    amount = _amount(value)
+    return f"{symbol}{amount}" if symbol else f"{amount} {unit}".strip()
+
 #: 超过这个年龄就说「陈旧」，不再印数字（与采集器 30 分钟的陈旧阈值同源）
 STALE_AGE_S = 30 * 60.0
 
@@ -60,9 +71,7 @@ def badge_candidates(report: dict[str, Any] | None, meta: dict[str, Any] | None)
         if not items:
             continue
         first = items[0]
-        unit = str(first.get("unit") or "")
-        symbol = _SYMBOLS.get(unit.upper(), unit)
-        amount = f"{symbol}{_amount(first.get('value'))}"
+        amount = _money(first.get("value"), str(first.get("unit") or ""))
         name = str(service.get("name") or "余额")
         full = f"{name} {amount} · {_ago(age)}"
         return [full, f"{amount} · {_ago(age)}", amount]
@@ -108,9 +117,7 @@ def badge_bubble_candidates(
         if not items:
             continue
         first = items[0]
-        unit = str(first.get("unit") or "")
-        symbol = _SYMBOLS.get(unit.upper(), unit)
-        amount = f"{symbol}{_amount(first.get('value'))}"
+        amount = _money(first.get("value"), str(first.get("unit") or ""))
         name = str(service.get("name") or "余额")
         ago = _ago(age)
         return [

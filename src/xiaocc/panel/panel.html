@@ -47,6 +47,13 @@ __XIAOCC_STYLE__</style>
   </section>
 
   <section>
+    <div class="label">本机负载 <span class="tag" id="tag-dev"></span></div>
+    <div class="kv" id="dev"></div>
+    <p class="note">这一节在面板进程里现采（<code>vm_stat</code> / <code>pmset</code>），
+    取不到就写「未取到」——不在 UI 循环里轮询，只在打开/刷新这一下采一次。</p>
+  </section>
+
+  <section>
     <div class="label">单击小cc时显示 <span class="tag" id="tag-set"></span></div>
     <div class="seg" id="click-actions"></div>
     <p class="note" id="bubble-preview"></p>
@@ -70,6 +77,13 @@ function ago(sec){
   return (s/3600).toFixed(1)+' 小时前';
 }
 function money(v){ return v==null?'—':Number(v).toFixed(2); }
+// 单位：认得出货币才前置符号，认不出就后置（不然会拼出 `1200.00Credits` 这种没空格没符号的怪字）
+const CUR = {CNY:'¥', RMB:'¥', USD:'$', 'US$':'$'};
+function unitOf(u){ return CUR[String(u||'').toUpperCase()] || String(u||''); }
+function moneyUnit(v, u){
+  const sym = CUR[String(u||'').toUpperCase()], amount = money(v);
+  return sym ? esc(sym) + esc(amount) : esc(amount) + (u ? ' <i>' + esc(u) + '</i>' : '');
+}
 
 let book = 'default';           // 账本口径：default | all
 
@@ -93,7 +107,7 @@ function render(){
     const items = first.items || [];
     const top = items[0] || {};
     document.getElementById('hero-num').textContent = money(top.value);
-    document.getElementById('hero-cur').textContent = (top.unit||'') + ' · ' + first.name;
+    document.getElementById('hero-cur').textContent = (unitOf(top.unit) ? unitOf(top.unit) + ' · ' : '') + first.name;
     document.getElementById('hero-split').innerHTML = items.slice(1,3)
       .map(i => esc(i.label)+' <b>'+esc(money(i.value))+'</b>').join('<br>') || '<span class="none">只有总额</span>';
   } else {
@@ -112,7 +126,7 @@ function render(){
     // 金额列只放「主项」一个数（它是这家的结论），其余项压成一行小字；详情走名称列的小字，
     // 不许跑进金额列 —— 否则长理由会把金额顶出可视区（实测过）。
     const value = isOk
-      ? '<span class="amt">'+esc(money(primary.value))+'<i>'+esc(primary.unit||'')+'</i></span>'
+      ? '<span class="amt">'+moneyUnit(primary.value, primary.unit)+'</span>'
         + (rest.length ? '<em>'+rest.map(i => esc((i.label||'').replace(/^其中/, ''))+' '+esc(money(i.value))).join(' · ')+'</em>' : '')
       : '<span class="no">'+STATE_WORD+'</span>';
     const sub = isOk ? (s.source || '') : (s.detail || (s.state==='error' ? '' : '这家没有可自动取数的接口'));
@@ -159,14 +173,22 @@ function render(){
   document.getElementById('tag-pet').textContent = p.alive ? ('pid '+p.pid+' · 活着') : '离线';
 
   // 设置（就和面板同一页 —— 用户明确要求「设置和控制面板是同一个东西」）
+  const D = DATA.device || {rows: []};
+  document.getElementById('tag-dev').textContent = (D.rows && D.rows.length) ? '现采' : '未取到';
+  document.getElementById('dev').innerHTML = (D.rows && D.rows.length)
+    ? D.rows.map(r => '<div>'+esc(r[0])+' <b>'+esc(r[1])+'</b></div>').join('')
+    : '<div><b>未取到</b></div>';
+
   const S = DATA.settings || {};
   const labels = S.labels || {};
   const cur = S.click_action || 'badge';
   document.getElementById('tag-set').textContent = S.path ? S.path.split('/').pop() : 'settings.json';
   document.getElementById('click-actions').innerHTML = (S.actions||['badge','caption','none'])
     .map(a => '<button data-act="'+esc(a)+'" class="'+(a===cur?'on':'')+'">'+esc(labels[a]||a)+'</button>').join('');
+  const prevLines = Array.isArray(S.bubble_preview) ? S.bubble_preview : [S.bubble_preview || '—'];
   document.getElementById('bubble-preview').innerHTML =
-    '气泡里写的是：<b>' + esc(S.bubble_preview || '—') + '</b>';
+    '气泡里写的是：<b>' + prevLines.map(esc).join('<br>') + '</b>'
+    + '<span class="none">（两行；放不下会自动缩到更短一档）</span>';
   document.getElementById('set-note').innerHTML = (S.problems && S.problems.length)
     ? '设置文件有问题：' + esc(S.problems.join('；')) + '（已按默认值用）'
     : '改完立刻生效 —— 桌宠每 5 秒重读一次设置，不用重启它。气泡在屏上停 5 秒，最后 1.2 秒淡出。';
@@ -205,7 +227,12 @@ document.getElementById('seg-all').addEventListener('click', () => {
 });
 document.getElementById('click-actions').addEventListener('click', (ev) => {
   const b = ev.target.closest('button[data-act]');
-  if(b){ post('save', {click_action: b.dataset.act}); }
+  if(b){
+    // 点了**当场**切选中态（宿主保存后会重渲染一次再确认）——别让用户觉得"点了没反应"
+    // （用户 2026-09-29 报的就是"这三个按钮点不了"）
+    b.parentElement.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === b));
+    post('save', {click_action: b.dataset.act});
+  }
 });
 document.body.addEventListener('click', (ev) => {
   const a = ev.target.closest('a[data-url]');

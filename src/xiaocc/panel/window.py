@@ -100,7 +100,13 @@ def open_panel(
         return html
 
     # 控制器必须是 NSObject 子类（要同时当 WKScriptMessageHandler、NSTimer 的 target、窗口 delegate）
-    class Controller(AppKit.NSObject):  # type: ignore[misc]
+    #
+    # 注意：**脚本消息不注册在 Controller 上**，而是交给下面那个专用桥 _Bridge —— 为什么见
+    # _Bridge 的注释（2026-09-29 实测：多角色的 Controller 收不到消息，专用对象一注册就通）。
+    class Controller(  # type: ignore[misc]
+        AppKit.NSObject,
+        protocols=[objc.protocolNamed("WKScriptMessageHandler")],  # type: ignore[call-arg]
+    ):
         def initWithTheme_(self, initial_theme):
             # pyobjc 的 initWith… 惯用法必须重绑 self（同 ops/motion_positive_control.py 那条误报）
             self = objc.super(Controller, self).init()  # noqa: PLW0642
@@ -109,6 +115,8 @@ def open_panel(
             self._theme = initial_theme
             self._window = None
             self._web = None
+            #: 页面→宿主那条消息链的专用桥（见 _Bridge）
+            self._bridge = None
             self._last_request = 0.0
             self._seen_request()
             return self
@@ -156,7 +164,14 @@ def open_panel(
                 except ValueError:
                     body = {"action": body}
             if not isinstance(body, dict):
-                return
+                # **页面传来的对象是 NSDictionary，不是 Python dict**（PyObjC 那层桥不过度转换），
+                # `isinstance(body, dict)` 直接把它挡在门外 ⇒ 面板里每个按钮都"点了没反应"。
+                # 2026-09-29 与「handler 不能用 Controller 自己」一起构成了这个 bug 的全部病因。
+                try:
+                    body = dict(body)
+                except (TypeError, ValueError):
+                    log.warning("页面消息解析不了：%r", body)
+                    return
             action = body.get("action")
             if action == "refresh":
                 self._refresh_async()
@@ -293,9 +308,14 @@ def open_panel(
                 config.preferences().setValue_forKey_(True, "developerExtrasEnabled")
             except Exception:  # noqa: BLE001,S110 - 私有键，失败无所谓
                 pass
-            config.userContentController().addScriptMessageHandler_name_(self, "xiaocc")
-
             web = WebKit.WKWebView.alloc().initWithFrame_configuration_(rect, config)
+            # 注册在 **web 自己的** configuration 上（创建之后），handler 是**专用桥**
+            # （不是 Controller，理由见 _Bridge 的注释）。
+            if self._bridge is None:
+                self._bridge = _Bridge.alloc().initWithController_(self)
+            web.configuration().userContentController().addScriptMessageHandler_name_(
+                self._bridge, "xiaocc"
+            )
             web.setAutoresizingMask_(
                 AppKit.NSViewWidthSizable | AppKit.NSViewHeightSizable
             )
@@ -313,6 +333,32 @@ def open_panel(
                 REQUEST_POLL_S, self, "tick:", None, True
             )
             window.makeKeyAndOrderFront_(None)
+
+    class _Bridge(  # type: ignore[misc]
+        AppKit.NSObject,
+        protocols=[objc.protocolNamed("WKScriptMessageHandler")],
+    ):
+        """页面 → 宿主那条消息链的**专用桥**（就是它去当 messageHandler，不是 Controller）。
+
+        2026-09-29 实测（真窗口 + evaluateJavaScript 真点 + 三种对象对照）：
+        同一个 Controller 既当 NSWindow 委托、又当 WKWebView 导航委托、又是 NSTimer 的 target
+        时，它当 messageHandler **一条消息都收不到** —— 注册在创建前那份 config 上不行、
+        注册在 `web.configuration()` 上不行、换个名字再注册也不行；而随便一个只干这一件事的
+        NSObject 子类（函数内定义的、甚至不声明协议的）**注册完立刻就能收到**。
+        所以用一个专用对象接，收到后直接调 Controller 的 Python 方法转发（同进程，纯 Python 调用）。
+        """
+
+        def initWithController_(self, controller):
+            # pyobjc 的 initWith… 惯用法必须重绑 self
+            self = objc.super(_Bridge, self).init()  # noqa: PLW0642
+            if self is None:
+                return None
+            self._controller = controller
+            return self
+
+        def userContentController_didReceiveScriptMessage_(self, ucc, message):
+            log.info("页面消息：%s", message.body())
+            self._controller.userContentController_didReceiveScriptMessage_(ucc, message)
 
     app = AppKit.NSApplication.sharedApplication()
     # Accessory：有窗口、不进 Dock（桌宠是常驻小东西，不该多占一个 Dock 位）
