@@ -1,4 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="820" height="380" viewBox="0 0 820 380" font-family="-apple-system, 'PingFang SC', 'Helvetica Neue', sans-serif">
+  <desc>xiaocc original concept artwork (direction draft) - programmatically generated with AI assistance (Codex CLI, `codex exec`) from the written spec archived in docs/design/丸丸-资产说明.md and docs/design/生成记录.md, then proofread by hand. Licensed MIT. 本项目原创的方向概念稿（A/B/C 三选一用）：由 AI 辅助（Codex CLI）按 docs/design/丸丸-资产说明.md / docs/design/生成记录.md 留档的书面规格程序化生成，再人工校对，以 MIT 发布。</desc>
   <defs>
     <linearGradient id="bgC" x1="0" y1="0" x2="0" y2="1">
       <stop offset="0" stop-color="#FFF9F2"/><stop offset="1" stop-color="#F5EADC"/>
