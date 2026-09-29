@@ -23,9 +23,11 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import tempfile
+import time
 from collections import namedtuple
 from itertools import pairwise
 from pathlib import Path
@@ -40,6 +42,10 @@ sys.path.insert(0, str(REPO / "src"))
 _TMP = Path(tempfile.mkdtemp(prefix="xiaocc-dragfix-"))
 os.environ["XIAOCC_ANCHOR_FILE"] = str(_TMP / "anchor.json")
 os.environ["XIAOCC_PROBE_FILE"] = str(_TMP / "probe.json")
+# 点击入口（⑦⑧）会让桌宠去「请求打开控制面板」—— 那两个文件同样指到临时目录，
+# 并且伪造一个「已有面板在跑」的状态文件（pid 填本进程），免得检验本身拉出一个真窗口。
+os.environ["XIAOCC_PANEL_REQUEST"] = str(_TMP / "panel.request")
+os.environ["XIAOCC_PANEL_STATE"] = str(_TMP / "panel.json")
 
 import Quartz
 
@@ -236,6 +242,44 @@ def check_drag_watchdog(backend, number: int, real_button_down) -> None:
     backend._mouse_button_down = lambda: True
 
 
+def check_tap_opens_panel(backend, number: int) -> None:
+    """⑦⑧ 点一下 vs 拖一把：**只有「按下到松开没动」**才该去开控制面板。
+
+    走的是真机同一条处理函数路径（``_mouse_down`` / ``_mouse_dragged`` / ``_mouse_up``），
+    而 ``request_open`` 落的是 ``XIAOCC_PANEL_REQUEST``（临时目录）+ 状态文件里伪造的活 pid，
+    所以这条判据既不碰用户真实的面板状态、也不会真拉一个窗口起来。判据取双向：
+    点一下必须请求、拖一把必须不请求 —— 单向的话「无脑开面板」也能绿。
+    """
+    from xiaocc.panel import paths
+
+    req = paths.PANEL_REQUEST
+    assert str(req).startswith(str(_TMP)), f"请求文件跑到临时目录外了：{req}"
+    paths.PANEL_STATE.write_text(json.dumps({"pid": os.getpid(), "at": time.time()}), encoding="utf-8")
+
+    real = server_rect(number)
+    assert real is not None, "窗口服务器读不到窗口"
+    center = wl.Point(real[0] + real[2] / 2, real[1] + real[3] / 2)
+
+    req.unlink(missing_ok=True)
+    backend._mouse_down(event_for(center, backend._window_local))
+    backend.linger(0.04)
+    backend._mouse_up(None)
+    backend.linger(0.05)
+    _check("⑦点一下桌宠 ⇒ 请求打开控制面板", req.exists(), f"{req.name} exists={req.exists()}")
+
+    req.unlink(missing_ok=True)
+    backend._mouse_down(event_for(center, backend._window_local))
+    backend._mouse_dragged(event_for(wl.Point(center.x + 40.0, center.y), backend._window_local))
+    backend.linger(0.04)
+    backend._mouse_up(None)
+    backend.linger(0.05)
+    _check(
+        "⑧拖一把桌宠 ⇒ 不开面板（反向控制）",
+        not req.exists(),
+        f"{req.name} exists={req.exists()}（拖动被当成点击了）",
+    )
+
+
 def main() -> int:
     character = load_character()
     # 指针钉在屏幕外：别让悬停/贴边逻辑插进来
@@ -281,6 +325,7 @@ def main() -> int:
         cursor[0] = wl.Point(-1000.0, -1000.0)
         backend.linger(0.2)
         check_drag_watchdog(backend, number, real_button_down)
+        check_tap_opens_panel(backend, number)
     finally:
         backend.close()
         cursor[0] = wl.Point(-1000.0, -1000.0)

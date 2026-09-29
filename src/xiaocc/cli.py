@@ -84,6 +84,18 @@ def _build_parser() -> argparse.ArgumentParser:
     validate.add_argument("path", nargs="?", default=None, help="角色包目录，默认内置角色")
     char_sub.add_parser("list", help="列出可用角色包")
 
+    quota = sub.add_parser("quota", help="额度：show 看剩余 / refresh 采集一次")
+    quota.add_argument("quota_command", choices=("show", "refresh"), nargs="?", default="show")
+    quota.add_argument("--json", action="store_true", help="原样打 JSON")
+
+    panel = sub.add_parser("panel", help="控制面板：额度 / 本机账本 / 桌宠现状（WKWebView）")
+    panel.add_argument("--theme", choices=("night", "paper"), default="night", help="皮肤")
+    panel.add_argument("--request", action="store_true", help="只请求打开/抬到前面（桌宠入口用）")
+    panel.add_argument("--dump", type=Path, metavar="FILE", help="只渲染到这个文件，不起窗口")
+    panel.add_argument("--out", type=Path, default=None, help="窗口那份 HTML 落在哪")
+    panel.add_argument("--quota", type=Path, default=None, help="quota.json 路径")
+    panel.add_argument("--probe", type=Path, default=None, help="probe.json 路径")
+
     return parser
 
 
@@ -354,7 +366,12 @@ def _cmd_run(args: argparse.Namespace) -> int:
         except ValueError:  # 非主线程，忽略
             pass
 
-    log.info("小cc 启动：源=%s 角色=%s 节拍=%.2fs", specs, character.name, engine.interval)
+    # 横幅里带 pid + 构建标识：面板日志是 launchd 的 append 文件、跨启动逐代叠放（实测一天 15 次启动、
+    # 两代构建并排在同一个文件里），没有这两项就只能靠日志格式反推是哪一代、是谁写的。
+    log.info(
+        "小cc 启动：pid=%d rev=%s 源=%s 角色=%s 节拍=%.2fs",
+        os.getpid(), _build_rev(), specs, character.name, engine.interval,
+    )
     try:
         while not stopping:
             frame = engine.tick()
@@ -418,8 +435,53 @@ def main(argv: list[str] | None = None) -> int:
             return 0
     if args.command == "run":
         return _cmd_run(args)
+    if args.command == "quota":
+        from .quota.__main__ import main as quota_main
+
+        return quota_main([args.quota_command] + (["--json"] if args.json else []))
+    if args.command == "panel":
+        from .panel.__main__ import main as panel_main
+
+        argv: list[str] = ["--theme", args.theme]
+        if args.request:
+            argv.append("--request")
+        if args.dump is not None:
+            argv += ["--dump", str(args.dump)]
+        if args.out is not None:
+            argv += ["--out", str(args.out)]
+        if args.quota is not None:
+            argv += ["--quota", str(args.quota)]
+        if args.probe is not None:
+            argv += ["--probe", str(args.probe)]
+        return panel_main(argv)
     parser.print_help()
     return 1
+
+
+def _build_rev() -> str:
+    """启动横幅里的构建标识：短 commit（工作树脏则带 -dirty），取不到就 ``nogit``。
+
+    为什么值得在启动时花一次 git：面板日志由 launchd 以 append 打开、**跨启动逐代叠放**，
+    一天实测 15 次启动 / 2 代构建写在同一个文件里 —— 没有这一行，事后只能靠日志格式反推
+    「这一段是谁写的、是哪一版」，而按行切代的结论很容易错（本仓库就踩过）。
+    """
+    import subprocess
+
+    try:
+        repo = Path(__file__).resolve().parents[2]
+        sha = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, timeout=5, check=False,
+        ).stdout.strip()
+        if not sha:
+            return "nogit"
+        dirty = subprocess.run(
+            ["git", "-C", str(repo), "status", "--porcelain"],
+            capture_output=True, text=True, timeout=5, check=False,
+        ).stdout.strip()
+        return sha + ("-dirty" if dirty else "")
+    except (OSError, subprocess.SubprocessError):
+        return "nogit"
 
 
 if __name__ == "__main__":  # pragma: no cover

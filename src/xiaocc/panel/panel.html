@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="night">
+<head>
+<meta charset="utf-8">
+<title>小cc · 控制面板</title>
+<style>
+/* 小cc 面板。两套皮肤共用一个 DOM：night（夜航仪表，默认）/ paper（对账单）。
+   配色直接取小cc 自己的调色板：#6FD3E8 屏光、#FFC24B 工具橙、#5BD08A 绿、#F2665E 红、
+   #F4EFE6 纸底、#2B2E3A 墨 —— 网页与桌宠同一套视觉，不另起一套。
+   数据来自 ~/.xiaocc/quota.json（采集器 15min 一拍）与桌宠自证据 ~/.xiaocc/probe.json。 */
+:root{
+  --cyan:#6FD3E8; --orange:#FFC24B; --green:#5BD08A; --red:#F2665E;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --serif:ui-serif,"New York","Songti SC",Georgia,serif;
+  --r:10px;
+}
+html[data-theme="night"]{
+  --bg:#0B0D11; --win:#14161C; --bar:#1B1E26; --sunk:#171A21; --chip:rgba(111,211,232,.06);
+  --ink:#E8EAF0; --ink2:#8A90A0; --faint:#5C6273; --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
+  --numfont:var(--mono); --shadow:0 30px 80px rgba(0,0,0,.55); --winline:1px solid var(--line2); --rad:14px;
+}
+html[data-theme="paper"]{
+  --bg:#DED7C9; --win:#F4EFE6; --bar:#EDE7DB; --sunk:rgba(43,46,58,.04); --chip:rgba(255,255,255,.55);
+  --ink:#2B2E3A; --ink2:#5A6070; --faint:#7C828E; --line:rgba(43,46,58,.14); --line2:rgba(43,46,58,.28);
+  --numfont:var(--serif); --shadow:0 24px 60px rgba(43,46,58,.28); --winline:1px solid rgba(43,46,58,.10); --rad:4px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font:400 13px/1.55 -apple-system,"SF Pro Text",system-ui,sans-serif;color:var(--ink);
+     display:flex;justify-content:center;align-items:flex-start;padding:0}
+.win{width:100%;max-width:560px;background:var(--win);border:var(--winline);border-radius:var(--rad);overflow:hidden;
+     box-shadow:var(--shadow);min-height:100vh;display:flex;flex-direction:column}
+html[data-theme="night"] .win{background:var(--win)}
+/* 顶栏 */
+.bar{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bar)}
+html[data-theme="paper"] .bar{background:transparent;border-bottom:1px solid var(--line)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
+html[data-theme="night"] .dot{box-shadow:0 0 8px var(--green)}
+.bar h1{margin:0;font:600 13px/1 ui-serif,"Songti SC",serif;letter-spacing:.02em}
+html[data-theme="night"] .bar h1{font-family:-apple-system,"SF Pro Text",sans-serif}
+.bar .sub{color:var(--faint);font:400 11px/1 var(--mono)}
+.bar .spacer{flex:1}
+button.tool{border:1px solid var(--line2);background:transparent;color:var(--ink2);border-radius:7px;padding:5px 10px;
+     font:500 11px/1 -apple-system;cursor:pointer;white-space:nowrap}
+button.tool:hover{color:var(--ink);border-color:var(--cyan)}
+html[data-theme="paper"] button.tool{border-radius:3px}
+/* 区段 */
+section{padding:16px}
+section+section{border-top:1px solid var(--line)}
+.label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:12px;display:flex;gap:8px;align-items:center}
+html[data-theme="paper"] .label{color:var(--ink2);font-weight:600}
+.label .tag{margin-left:auto;letter-spacing:0;text-transform:none;font:400 10px/1 var(--mono);color:var(--faint);
+     border:1px solid var(--line2);border-radius:20px;padding:3px 7px}
+html[data-theme="paper"] .label .tag{border-radius:2px}
+/* 主数字 */
+.hero{display:flex;align-items:flex-end;gap:12px}
+.hero .num{font:600 46px/1 var(--numfont);letter-spacing:-.02em}
+html[data-theme="night"] .hero .num{background:linear-gradient(180deg,#fff,#B9C2D6);-webkit-background-clip:text;background-clip:text;color:transparent}
+html[data-theme="paper"] .hero .num{font-weight:400;font-size:52px}
+.hero .cur{font:500 14px/1 var(--mono);color:var(--cyan);padding-bottom:6px}
+html[data-theme="paper"] .hero .cur{color:var(--ink2)}
+.hero .split{margin-left:auto;text-align:right;font:400 11px/1.7 var(--mono);color:var(--ink2)}
+.hero .split b{color:var(--ink);font-weight:500}
+.hero .split .none{color:var(--faint)}
+.rule{height:1px;background:var(--line);margin:14px 0 4px}
+/* 服务行：名称列吃剩余宽度、金额列与链接列不参与收缩（长详情不许顶掉金额） */
+.rows{display:flex;flex-direction:column}
+.row{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .st{width:7px;height:7px;flex:0 0 auto;border-radius:50%;margin-top:4px}
+.st.ok{background:var(--green)}
+html[data-theme="night"] .st.ok{box-shadow:0 0 7px var(--green)}
+.st.bad{background:var(--red)}
+.st.unk{background:transparent;border:1px dashed var(--faint);width:6px;height:6px}
+html[data-theme="paper"] .st.ok{border-radius:1px;transform:rotate(45deg)}
+html[data-theme="paper"] .st.unk{background:transparent;border:1px solid var(--line2);transform:rotate(45deg)}
+.row .name{flex:1 1 auto;min-width:0;font-weight:500}
+.row .name small{display:block;color:var(--faint);font-size:10px;font-weight:400;margin-top:2px;
+     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .val{flex:0 0 auto;max-width:46%;text-align:right;font:500 13px/1.35 var(--mono)}
+.row .val .amt{white-space:nowrap}
+.row .val .amt i{font-style:normal;font-size:10px;color:var(--faint);margin-left:3px}
+.row .val em{display:block;font:400 10px/1.5 var(--mono);font-style:normal;color:var(--faint);white-space:nowrap}
+.row .val.unk{color:var(--ink2);font-weight:400}
+.row .val .no{display:inline-block;border:1px dashed var(--line2);border-radius:20px;padding:2px 8px;font:400 11px/1.4 var(--mono)}
+.row .go{flex:0 0 auto;color:var(--cyan);text-decoration:none;font:400 10px/1 -apple-system;opacity:.8;
+     white-space:nowrap;padding-top:3px}
+html[data-theme="paper"] .row .go{color:#3E6FD9}
+.row .go:hover{opacity:1;text-decoration:underline}
+/* 分段控件 */
+.seg{display:flex;gap:6px;margin-bottom:12px}
+.seg button{border:1px solid var(--line2);background:transparent;color:var(--ink2);border-radius:7px;padding:4px 9px;
+     font:500 10.5px/1 -apple-system;cursor:pointer}
+html[data-theme="paper"] .seg button{border-radius:2px}
+.seg button.on{background:var(--sunk);color:var(--ink);border-color:var(--cyan)}
+html[data-theme="paper"] .seg button.on{background:var(--ink);border-color:var(--ink);color:var(--win)}
+/* 表 */
+table{width:100%;border-collapse:collapse;font:400 12px/1.6 var(--mono)}
+td{padding:6px 0;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+td.k{color:var(--ink2)}
+td.v{text-align:right;font-weight:500}
+td.v small{color:var(--faint);font-weight:400}
+td.v .unknown{color:var(--orange);font-weight:400}
+.note{color:var(--faint);font-size:10.5px;line-height:1.6;margin:10px 0 0}
+.stale{display:none;margin:0 0 12px;padding:8px 10px;border:1px solid var(--orange);border-radius:8px;
+       color:var(--orange);font-size:11px;line-height:1.5}
+.stale.on{display:block}
+/* 桌宠现状 */
+.kv{display:flex;flex-wrap:wrap;gap:8px 18px}
+.kv div{font:400 11.5px/1.5 var(--mono);color:var(--ink2)}
+.kv div b{color:var(--ink);font-weight:500}
+footer{margin-top:auto;padding:11px 16px;border-top:1px solid var(--line);background:var(--bar);display:flex;gap:10px;
+     font:400 10.5px/1.5 var(--mono);color:var(--faint)}
+html[data-theme="paper"] footer{background:transparent}
+footer .spacer{flex:1}
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="bar">
+    <span class="dot" id="dot"></span>
+    <h1>小cc · 控制面板</h1>
+    <span class="sub" id="fresh"></span>
+    <span class="spacer"></span>
+    <button class="tool" id="btn-refresh">刷新</button>
+    <button class="tool" id="btn-theme">皮肤</button>
+    <button class="tool" id="btn-close">关闭</button>
+  </div>
+
+  <section>
+    <div class="label">官方实时余额 <span class="tag" id="tag-svc"></span></div>
+    <div class="stale" id="stale"></div>
+    <div class="hero">
+      <div class="num" id="hero-num">—</div><div class="cur" id="hero-cur"></div>
+      <div class="split" id="hero-split"></div>
+    </div>
+    <div class="rule"></div>
+    <div class="rows" id="rows"></div>
+  </section>
+
+  <section>
+    <div class="label">本机账本 · 近 <span id="ledger-days">30</span> 天 <span class="tag">估价，非账单</span></div>
+    <div class="seg">
+      <button id="seg-default" class="on">默认 profile</button>
+      <button id="seg-all">全部 6 库</button>
+    </div>
+    <table><tbody id="ledger"></tbody></table>
+    <p class="note" id="ledger-note"></p>
+  </section>
+
+  <section>
+    <div class="label">桌宠现状 <span class="tag" id="tag-pet"></span></div>
+    <div class="kv" id="pet"></div>
+    <p class="note">这一节直接读桌宠自己写的自证据（<code>probe.json</code>），不是猜的。面板里暂时只有「刷新」会写东西：
+    桌宠还能改的项（缩放/位置/语音…）要哪些你说，我再接，不摆点不动的开关。</p>
+  </section>
+
+  <footer>
+    <span id="foot-left"></span><span class="spacer"></span><span id="foot-right"></span>
+  </footer>
+</div>
+
+<script>
+const DATA = __XIAOCC_PAYLOAD__;
+
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function ago(sec){
+  if(sec==null) return '未知';
+  const s=Math.round(sec);
+  if(s<90) return s+' 秒前';
+  if(s<5400) return Math.round(s/60)+' 分钟前';
+  return (s/3600).toFixed(1)+' 小时前';
+}
+function money(v){ return v==null?'—':Number(v).toFixed(2); }
+
+let book = 'default';           // 账本口径：default | all
+
+function render(){
+  const q = DATA.quota || {}, meta = q.meta || {}, rep = q.report || {};
+  const svcs = (rep.services || []);
+  const ok = svcs.filter(s => s.state === 'ok' && (s.items||[]).length);
+  const first = ok[0];
+
+  document.getElementById('tag-svc').textContent = ok.length + ' 家有接口 / ' + svcs.length + ' 家';
+  document.getElementById('fresh').textContent = meta.exists ? ('采集 ' + ago(meta.age_s)) : '还没有采集数据';
+  document.getElementById('dot').style.background = (!meta.exists || meta.stale) ? 'var(--orange)' : 'var(--green)';
+
+  const stale = document.getElementById('stale');
+  if(!meta.exists){ stale.className='stale on'; stale.textContent='还没有 quota.json —— 采集器还没跑过，或文件被删了。点「刷新」立刻采集一次。'; }
+  else if(meta.stale){ stale.className='stale on'; stale.textContent='采集器已经 '+ago(meta.age_s)+' 没更新了（15 分钟一拍，两拍没动就是它出问题）—— 下面的数字可能是旧的。'; }
+  else { stale.className='stale'; }
+
+  // 主数字 = 第一家真有余额的服务
+  if(first){
+    const items = first.items || [];
+    const top = items[0] || {};
+    document.getElementById('hero-num').textContent = money(top.value);
+    document.getElementById('hero-cur').textContent = (top.unit||'') + ' · ' + first.name;
+    document.getElementById('hero-split').innerHTML = items.slice(1,3)
+      .map(i => esc(i.label)+' <b>'+esc(money(i.value))+'</b>').join('<br>') || '<span class="none">只有总额</span>';
+  } else {
+    document.getElementById('hero-num').textContent = '未知';
+    document.getElementById('hero-cur').textContent = '没有一家能取到余额';
+    document.getElementById('hero-split').innerHTML = '<span class="none">见下面各家</span>';
+  }
+
+  document.getElementById('rows').innerHTML = svcs.map(s => {
+    const items = s.items || [];
+    const isOk = s.state==='ok' && items.length;
+    const st = s.state==='ok' ? 'ok' : (s.state==='error' ? 'bad' : 'unk');
+    const primary = items[0] || {}, rest = items.slice(1);
+    // 金额列只放「主项」一个数（它是这家的结论），其余项压成一行小字；详情走名称列的小字，
+    // 不许跑进金额列 —— 否则长理由会把金额顶出可视区（实测过）。
+    const value = isOk
+      ? '<span class="amt">'+esc(money(primary.value))+'<i>'+esc(primary.unit||'')+'</i></span>'
+        + (rest.length ? '<em>'+rest.map(i => esc((i.label||'').replace(/^其中/, ''))+' '+esc(money(i.value))).join(' · ')+'</em>' : '')
+      : '<span class="no">'+(s.state==='error'?'出错':'未取到')+'</span>';
+    const sub = isOk ? (s.source || '') : (s.detail || (s.state==='error' ? '' : '没有可用接口'));
+    const link = s.console ? '<a class="go" href="#" data-url="'+esc(s.console)+'">控制台 ↗</a>' : '';
+    return '<div class="row"><span class="st '+st+'"></span>'
+         + '<span class="name" title="'+esc(sub)+'">'+esc(s.name)+'<small>'+esc(sub)+'</small></span>'
+         + '<span class="val'+(isOk?'':' unk')+'">'+value+'</span>'+link+'</div>';
+  }).join('') || '<div class="row"><span class="name">采集器还没产出任何条目</span></div>';
+
+  // 账本
+  const L = rep.ledger || {};
+  const b = (book==='default' ? L.default_profile : L.all_profiles) || {};
+  document.getElementById('ledger-days').textContent = L.window_days || 30;
+  const costKnown = !!b.cost_known && b.cost_usd != null;
+  document.getElementById('ledger').innerHTML =
+      '<tr><td class="k">模型调用</td><td class="v">'+Number(b.calls||0).toLocaleString()+' <small>次</small></td></tr>'
+    + '<tr><td class="k">输入 / 输出 token</td><td class="v">'+Number(b.input_tokens||0).toLocaleString()+' <small>/</small> '+Number(b.output_tokens||0).toLocaleString()+'</td></tr>'
+    + '<tr><td class="k">累计花费</td><td class="v">'+(costKnown? '$'+money(b.cost_usd)+' <small>USD</small>' : '<span class="unknown">金额未知</span>')+'</td></tr>'
+    + '<tr><td class="k">未计价调用</td><td class="v">'+Number(b.unpriced_calls||0).toLocaleString()+' <small>次</small></td></tr>'
+    + (b.path? '<tr><td class="k">库</td><td class="v" style="font-weight:400">'+esc(b.path||b.note||'')+'</td></tr>':'');
+  document.getElementById('ledger-note').innerHTML =
+      '金额取本机 state.db 的记账字段（Hermes 自报价目，普遍偏低），<b>只作趋势参考、不是账单</b>；'
+    + '「未计价」= 那一行没有金额，不含在上面的花费里。'
+    + (book==='default' ? '当前口径：<b>仅默认 profile</b>（点「全部 6 库」看六个库合计）。' : '当前口径：<b>全部 6 库</b>。');
+
+  // 桌宠现状
+  const p = DATA.pet || {};
+  const f = p.ns_frame || [0,0,0,0];
+  const cells = [
+    ['状态', p.state], ['画面', p.art], ['状态源', p.state_source],
+    ['位置', f[0]+','+f[1]], ['尺寸', (p.view_size||[0,0])[0]+'×'+(p.view_size||[0,0])[1]],
+    ['贴边', p.dock], ['锚点', p.anchor_state + (p.anchor_ok?' ✓':' ✗')],
+    ['圈速', (p.pump_loops_per_sec||0)+'/s'], ['状态已持续', ago(p.state_changed_ago_s)],
+    ['进程', p.pid]
+  ];
+  document.getElementById('pet').innerHTML = p.alive
+    ? cells.map(c => '<div>'+c[0]+' <b>'+esc(c[1])+'</b></div>').join('')
+    : '<div><b>桌宠没在跑</b>（读不到 probe 或 alive=false）</div>';
+  document.getElementById('tag-pet').textContent = p.alive ? ('pid '+p.pid+' · 活着') : '离线';
+
+  document.getElementById('foot-left').textContent = '下一轮约 ' +
+     (meta.age_s==null ? '—' : Math.max(1, Math.round((900 - meta.age_s)/60)) + ' 分钟后');
+  document.getElementById('foot-right').textContent = (meta.path||'quota.json') + ' · 0600';
+}
+
+function post(action, extra){
+  const msg = Object.assign({action:action}, extra||{});
+  const h = (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.xiaocc);
+  if(h){ h.postMessage(msg); }
+  else { document.getElementById('foot-left').textContent = '浏览器里打开：' + action + ' 需要小cc 的窗口宿主'; }
+  return msg;
+}
+
+document.getElementById('btn-refresh').addEventListener('click', () => post('refresh'));
+document.getElementById('btn-close').addEventListener('click', () => post('close'));
+document.getElementById('btn-theme').addEventListener('click', () => {
+  const next = document.documentElement.dataset.theme === 'night' ? 'paper' : 'night';
+  document.documentElement.dataset.theme = next;
+  post('theme', {value: next});
+});
+document.getElementById('seg-default').addEventListener('click', () => {
+  book='default';
+  document.getElementById('seg-default').classList.add('on');
+  document.getElementById('seg-all').classList.remove('on');
+  render();
+});
+document.getElementById('seg-all').addEventListener('click', () => {
+  book='all';
+  document.getElementById('seg-all').classList.add('on');
+  document.getElementById('seg-default').classList.remove('on');
+  render();
+});
+document.body.addEventListener('click', (ev) => {
+  const a = ev.target.closest('a[data-url]');
+  if(a){ ev.preventDefault(); post('open', {url: a.dataset.url}); }
+});
+
+if(DATA.theme){ document.documentElement.dataset.theme = DATA.theme; }
+render();
+</script>
+</body>
+</html>

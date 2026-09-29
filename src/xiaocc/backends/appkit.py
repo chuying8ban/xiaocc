@@ -130,6 +130,8 @@ _DRAG_MAX_SLEEP = 0.004
 #: 3.5 小时、9.6% 的遗留实例就是同一类病）。按住不放时按钮非 0，所以
 #: 「手停住不动的拖动」不会被误判成松手。宽度取 80ms：真实拖动的相邻事件间隔是
 #: 几毫秒量级，而窗口服务器切换按钮状态是同帧的。
+_TAP_SLOP = 3.0  #: 按下到松开的位移 ≤ 这么多像素就算「点击」，不算拖动
+_TAP_MAX_HOLD_S = 0.6  #: 按住超过这么久就不当点击
 _DRAG_BUTTON_UP_GRACE = 0.08
 
 _IMAGE_SUFFIXES = (".png", ".svg", ".pdf", ".tiff", ".jpg", ".jpeg")
@@ -345,6 +347,10 @@ class AppKitBackend(Backend):
         self._last_paint_at = 0.0
         #: 拖拽兜底：鼠标键第一次读到「全松开」的时刻（见 ``_DRAG_BUTTON_UP_GRACE``）
         self._buttons_up_since: float | None = None
+        #: 这一次按下是不是「点击」（按下到松开没怎么动）—— 判定见 :meth:`_mouse_up`
+        self._press_at: float | None = None
+        self._press_point: wl.Point | None = None
+        self._press_moved = False
         #: 光标当前是否落在热区 —— 由 :meth:`_poll` 维护，指纹要用
         self._cursor_hot = False
         #: 事件循环的自证据：本秒累计圈数 / 上一秒结算出的圈速 / 上一圈真正睡了多久
@@ -1076,18 +1082,49 @@ class AppKitBackend(Backend):
         point = self._mouse_screen_point(event)
         # 按下时指针在窗口内的位置（屏幕口径的偏移量），拖动期间保持不变
         self._drag_offset = (point.x - self._window_local.x, point.y - self._window_local.y)
+        # 记下起点，好在松手时分辨「点一下」还是「拖一把」
+        self._press_at = time.monotonic()
+        self._press_point = point
+        self._press_moved = False
 
     def _mouse_dragged(self, event: Any) -> None:
         if not self._dragging:
             return
         point = self._mouse_screen_point(event)
+        if self._press_point is not None and not self._press_moved:
+            far = abs(point.x - self._press_point.x) > _TAP_SLOP or abs(
+                point.y - self._press_point.y
+            ) > _TAP_SLOP
+            if far:
+                self._press_moved = True
         self.move_window_to(point.x - self._drag_offset[0], point.y - self._drag_offset[1])
 
     def _mouse_up(self, _event: Any) -> None:
         if not self._dragging:
             return
+        held = None if self._press_at is None else time.monotonic() - self._press_at
+        tap = (not self._press_moved) and held is not None and held <= _TAP_MAX_HOLD_S
+        self._press_at = None
+        self._press_point = None
         edge = self.end_drag()
         log.debug("拖拽结束：%s", edge)
+        if tap:
+            self._open_panel()
+
+    def _open_panel(self) -> None:
+        """点一下桌宠（按下到松开没动）= 打开控制面板；已经开着就把它抬到前面。
+
+        面板是**独立进程**（见 :mod:`xiaocc.panel`）：这里只写一个 request 文件，不 import
+        AppKit 之外的东西、不阻塞事件循环；失败也只记一行日志，绝不让桌宠跟着出事。
+        """
+        try:
+            from ..panel.paths import request_open
+
+            result = request_open()
+        except Exception as exc:  # noqa: BLE001 - 打不开面板不该影响桌宠本体
+            log.warning("打开控制面板失败：%s", exc)
+            return
+        log.info("点击桌宠 ⇒ 控制面板：%s", result)
 
     # —— 绘制 ————————————————————————————————————————————————————————————
 
