@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -97,6 +98,45 @@ SELECTED = (
     "Array.from(document.querySelectorAll('#click-actions button'))"
     ".map(b => b.dataset.act + (b.classList.contains('on') ? '*' : '')).join(' ')"
 )
+#: ⑫ 正文横向溢出探测：**逐元素比 scrollWidth 与 clientWidth**（只看横向）。
+#: 为什么用「有自己文字节点的元素」：整页扫描会把容器算进去、报出一堆与裁切无关的量。
+#: 只量横向：竖向差值会被 line-height / 字形盒基线差咬出 2–4px 的假溢出（`<h1>`、大数字都报过）。
+OVERFLOW = (
+    "(() => {"
+    " const out = [];"
+    " for (const el of document.querySelectorAll('body *')) {"
+    "  const tag = el.tagName.toLowerCase();"
+    "  if (tag === 'script' || tag === 'style') continue;"
+    "  const own = Array.from(el.childNodes).some(n => n.nodeType === 3 && n.textContent.trim());"
+    "  if (!own) continue;"
+    "  const over = el.scrollWidth - el.clientWidth;"
+    "  if (over > 2) out.push({tag: tag, cls: String(el.className || ''), over: over,"
+    "    text: (el.textContent || '').trim().slice(0, 60)});"
+    " }"
+    " return JSON.stringify(out);"
+    "})()"
+)
+#: ⑬ 的反向控制：往页面上塞一行**故意放不下**的文字，探针必须当场报出来。
+#: 没有这一条，⑫ 的绿就只是"这次恰好没量到"——今晚反复讲的"仪表不反向控制就不知道守不守得住"。
+CANARY_ADD = (
+    "(() => {"
+    " const d = document.createElement('div');"
+    " d.id = 'overflow-canary';"
+    " d.style.cssText = 'width:60px;white-space:nowrap;overflow:hidden';"
+    " d.textContent = '诱饵：这一行故意放不下';"
+    " document.body.appendChild(d);"
+    " return d.id;"
+    "})()"
+)
+CANARY_DEL = (
+    "(() => { const d = document.getElementById('overflow-canary');"
+    " if (d) d.remove(); return 'removed'; })()"
+)
+
+#: ⑫ 的白名单：**初始必须为空**，加一条就得写清理由（形如 `("per-key", "为什么这句允许被裁")`）。
+#: 空着不是为了好看：要么它会变成噪音工厂然后被人关掉，要么变成静默豁免 —— 两个失败模式今晚都见过。
+OVERFLOW_ALLOW: tuple[tuple[str, str], ...] = ()
+
 #: 点一下并回传「点之前 / 点之后」的选中态字符串 —— 页面当场有没有切过去，一眼可比
 CLICK = (
     "(() => {"
@@ -242,6 +282,58 @@ def main() -> int:
             panel_web()[1] is not None,
             f"webview={panel_web()[1] is not None}",
         )
+        js(OVERFLOW, sink, "overflow")
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.6, False, step11)
+
+    def step11(_t=None) -> None:
+        """⑫面板**正文**不许横向被裁（@researcher 量到过两处：千问 hint 68px、百炼 11px）。
+
+        口径三条，都是别处吃过亏换来的：**只看横向**（竖向会被 line-height/基线差咬出 2–4px 假溢出）；
+        **量 JS 跑完之后的 DOM**（今天两次栽在同一层：剥 `<style>` 扫模板会漏掉 JS 渲染出来的文本）；
+        **白名单必须写理由且初始为空**。
+        """
+        raw = sink.get("overflow", (None, None))
+        value, error = (raw if isinstance(raw, tuple) else (None, None))
+        caught: list[dict] = []
+        if isinstance(value, str) and value:
+            with contextlib.suppress(json.JSONDecodeError):
+                caught = json.loads(value)
+        allowed = [
+            item
+            for item in caught
+            if any(pattern in str(item.get("text") or "") for pattern, _reason in OVERFLOW_ALLOW)
+        ]
+        unknown = [item for item in caught if item not in allowed]
+        check(
+            "⑫面板正文没有横向被裁的文字（阈值 >2px；白名单为空）",
+            error is None and not unknown,
+            "无横向溢出" if not unknown else "; ".join(
+                f"{item.get('tag')}.{item.get('cls')} 超{item.get('over')}px：{item.get('text')}"
+                for item in unknown[:3]
+            ),
+        )
+        js(CANARY_ADD, sink, "canary_add")
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.4, False, step12)
+
+    def step12(_t=None) -> None:
+        """⑬ 反向控制：塞一行故意被裁的文字，探针必须看得见它（否则 ⑫ 的绿不算数）。"""
+        js(OVERFLOW, sink, "overflow2")
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.4, False, step13)
+
+    def step13(_t=None) -> None:
+        raw = sink.get("overflow2", (None, None))
+        value, error = (raw if isinstance(raw, tuple) else (None, None))
+        caught: list[dict] = []
+        if isinstance(value, str) and value:
+            with contextlib.suppress(json.JSONDecodeError):
+                caught = json.loads(value)
+        canary_seen = any("诱饵" in str(item.get("text") or "") for item in caught)
+        check(
+            "⑬反向控制：故意塞一行被裁文字 ⇒ 探针当场报出来（证明 ⑫ 守得住）",
+            error is None and canary_seen,
+            "诱饵被抓到" if canary_seen else f"诱饵没被抓到（探针失效）caught={caught[:2]}",
+        )
+        js(CANARY_DEL, sink, "canary_del")
         failed = [name for name, ok, _ in RESULTS if not ok]
         print(f"\n结果：{'PASS' if not failed else 'FAIL'}（{len(RESULTS) - len(failed)}/{len(RESULTS)}）")
         print(f"沙箱 {SANDBOX}")
