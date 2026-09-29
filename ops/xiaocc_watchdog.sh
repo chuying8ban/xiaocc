@@ -293,7 +293,15 @@ if [[ "$(_dragging)" == "yes" ]]; then
   exit 0
 fi
 
+WD_T0=$(date '+%H:%M:%S')
 CPU="$(_cpu_pct "$PID" "$WINDOW")"
+WD_T1=$(date '+%H:%M:%S')
+WD_DRAG=$(grep -E '^[0-9]{2}-[0-9]{2} ' "$PANEL_ERR" 2>/dev/null | awk -v a="$WD_T0" -v b="$WD_T1" '$2 >= a && $2 <= b && /判定=drag/ {n++} END{print n+0}')
+if [[ "${WD_DRAG:-0}" != "0" ]]; then
+  say "窗口 ${WD_T0}-${WD_T1} 内有过拖动（${WD_DRAG} 条）⇒ 本轮不计（拖动段 14~17% 不是稳态）"
+  _write_state "$STREAK" "nan" "窗口内有拖动，本轮不计" "$DISP" "$PSTATE"
+  exit 0
+fi
 if [[ "$CPU" == "nan" ]]; then
   say "量不到 CPU（pid=$PID 可能刚退出）⇒ 本轮不计"
   _write_state "$STREAK" "nan" "量不到 CPU" "$DISP"
