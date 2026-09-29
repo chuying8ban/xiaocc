@@ -24,7 +24,21 @@ import tempfile
 import time
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+ROOT = Path(__file__).resolve().parents[1]  # 仓库根：证据文件里的路径一律相对它写
+sys.path.insert(0, str(ROOT / "src"))
+
+
+def _rel(path: Path) -> str:
+    """证据文件里只写**相对仓库根**的路径。
+
+    ``docs/evidence/evidence.json`` 是受版本控制、要进公开仓库的：写绝对路径会泄露本机用户名
+    与目录结构（``/Users/<用户名>/...``），别人 clone 下来也对不上。截图被 ``--out`` 指到仓库外时
+    （相对仓库根表示不了）退化成只写文件名，宁可不完整也不泄露。
+    """
+    try:
+        return str(path.resolve().relative_to(ROOT))
+    except ValueError:
+        return path.name
 
 #: 取证脚本会真的拖动桌宠 → 必须把锚点与自证据指到临时路径。
 #: 不设的话，跑一次自测就把用户真实的 ~/.xiaocc/anchor.json 改成了脚本里的固定坐标，
@@ -126,7 +140,7 @@ class Driver:
         record = {
             "step": stem,
             "note": note,
-            "window_png": str(window_png) if ok else None,
+            "window_png": _rel(window_png) if ok else None,
             "probe": info,
         }
         if desktop:
@@ -136,7 +150,7 @@ class Driver:
             region = self.quartz.CGRectMake(x - pad, y - pad, width + pad * 2, height + pad * 2)
             desktop_png = self.out / f"{stem}.desktop.png"
             if capture_desktop_region(self.quartz, region, desktop_png):
-                record["desktop_png"] = str(desktop_png)
+                record["desktop_png"] = _rel(desktop_png)
         self.steps.append(record)
         return record
 

@@ -11,7 +11,7 @@
     1512.0,
     982.0
   ],
-  "started": "2026-09-29 03:09:14",
+  "started": "2026-09-29 09:51:24",
   "checks": [
     {
       "check": "窗口不透明=false",
@@ -118,9 +118,9 @@
     {
       "step": "01-idle-floating",
       "note": "自由漂浮 + 待机动画",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/01-idle-floating.png",
+      "window_png": "docs/evidence/01-idle-floating.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -143,23 +143,27 @@
         "anchor_state": "anchor",
         "art": "idle.svg",
         "caption_drawn": "",
+        "state_source": "demo",
+        "state_at": 1790646684.9594471,
+        "state_age_s": 0.672,
+        "state_ttl_s": null,
         "view_size": [
           160.0,
           194.0
         ],
         "pump_loops_per_sec": 0.0,
-        "pump_sleep_ms": 9.2,
+        "pump_sleep_ms": 1.5,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
-      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/01-idle-floating.desktop.png"
+      "desktop_png": "docs/evidence/01-idle-floating.desktop.png"
     },
     {
       "step": "02-docked-collapsed",
       "note": "拖到右边缘松手 → 收成把手条",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/02-docked-collapsed.png",
+      "window_png": "docs/evidence/02-docked-collapsed.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -182,23 +186,27 @@
         "anchor_state": "collapsed",
         "art": "idle.svg",
         "caption_drawn": "",
+        "state_source": "demo",
+        "state_at": 1790646684.9594471,
+        "state_age_s": 3.659,
+        "state_ttl_s": null,
         "view_size": [
           12.0,
           116.0
         ],
-        "pump_loops_per_sec": 31.6,
-        "pump_sleep_ms": 31.2,
+        "pump_loops_per_sec": 7.7,
+        "pump_sleep_ms": 26.2,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
-      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/02-docked-collapsed.desktop.png"
+      "desktop_png": "docs/evidence/02-docked-collapsed.desktop.png"
     },
     {
       "step": "03-handle-hover-no-flicker",
       "note": "松手后鼠标仍在条上：不许自动弹开",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/03-handle-hover-no-flicker.png",
+      "window_png": "docs/evidence/03-handle-hover-no-flicker.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -221,12 +229,16 @@
         "anchor_state": "collapsed",
         "art": "idle.svg",
         "caption_drawn": "",
+        "state_source": "demo",
+        "state_at": 1790646684.9594471,
+        "state_age_s": 6.019,
+        "state_ttl_s": null,
         "view_size": [
           12.0,
           116.0
         ],
-        "pump_loops_per_sec": 31.6,
-        "pump_sleep_ms": 12.0,
+        "pump_loops_per_sec": 12.8,
+        "pump_sleep_ms": 4.9,
         "state": "idle",
         "caption": "xiaocc · 待命"
       }
@@ -234,9 +246,9 @@
     {
       "step": "04-hover-expanded",
       "note": "鼠标移到把手条 → 展开（贴在右边缘）",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/04-hover-expanded.png",
+      "window_png": "docs/evidence/04-hover-expanded.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -259,23 +271,27 @@
         "anchor_state": "collapsed",
         "art": "idle.svg",
         "caption_drawn": "",
+        "state_source": "demo",
+        "state_at": 1790646684.9594471,
+        "state_age_s": 7.375,
+        "state_ttl_s": null,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 37.8,
-        "pump_sleep_ms": 12.3,
+        "pump_loops_per_sec": 8.1,
+        "pump_sleep_ms": 8.0,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
-      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/04-hover-expanded.desktop.png"
+      "desktop_png": "docs/evidence/04-hover-expanded.desktop.png"
     },
     {
       "step": "05-leave-recalls",
       "note": "鼠标离开 → 再次收起",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/05-leave-recalls.png",
+      "window_png": "docs/evidence/05-leave-recalls.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -298,12 +314,16 @@
         "anchor_state": "collapsed",
         "art": "idle.svg",
         "caption_drawn": "",
+        "state_source": "demo",
+        "state_at": 1790646684.9594471,
+        "state_age_s": 9.64,
+        "state_ttl_s": null,
         "view_size": [
           12.0,
           116.0
         ],
-        "pump_loops_per_sec": 37.8,
-        "pump_sleep_ms": 12.0,
+        "pump_loops_per_sec": 4.6,
+        "pump_sleep_ms": 6.4,
         "state": "idle",
         "caption": "xiaocc · 待命"
       }
@@ -311,9 +331,9 @@
     {
       "step": "06-state-idle",
       "note": "idle 动作 float",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/06-state-idle.png",
+      "window_png": "docs/evidence/06-state-idle.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -336,23 +356,27 @@
         "anchor_state": "anchor",
         "art": "idle.svg",
         "caption_drawn": "",
+        "state_source": "demo",
+        "state_at": 1790646696.320083,
+        "state_age_s": 0.603,
+        "state_ttl_s": null,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 38.0,
-        "pump_sleep_ms": 28.2,
+        "pump_loops_per_sec": 38.1,
+        "pump_sleep_ms": 19.2,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
-      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/06-state-idle.desktop.png"
+      "desktop_png": "docs/evidence/06-state-idle.desktop.png"
     },
     {
       "step": "07-state-working",
       "note": "working 动作 busy",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/07-state-working.png",
+      "window_png": "docs/evidence/07-state-working.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -375,23 +399,27 @@
         "anchor_state": "anchor",
         "art": "working.svg",
         "caption_drawn": "xiaocc · 正在执行 read_file",
+        "state_source": "demo",
+        "state_at": 1790646698.940363,
+        "state_age_s": 0.603,
+        "state_ttl_s": 45.0,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 31.0,
-        "pump_sleep_ms": 26.5,
+        "pump_loops_per_sec": 3.9,
+        "pump_sleep_ms": 18.4,
         "state": "working",
         "caption": "xiaocc · 正在执行 read_file"
       },
-      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/07-state-working.desktop.png"
+      "desktop_png": "docs/evidence/07-state-working.desktop.png"
     },
     {
       "step": "08-state-error",
       "note": "error 动作 wobble",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/08-state-error.png",
+      "window_png": "docs/evidence/08-state-error.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -414,23 +442,27 @@
         "anchor_state": "anchor",
         "art": "error.svg",
         "caption_drawn": "xiaocc · 出错了：状态源超时",
+        "state_source": "demo",
+        "state_at": 1790646701.555777,
+        "state_age_s": 0.602,
+        "state_ttl_s": 90.0,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 29.3,
-        "pump_sleep_ms": 24.9,
+        "pump_loops_per_sec": 6.9,
+        "pump_sleep_ms": 18.2,
         "state": "error",
         "caption": "xiaocc · 出错了：状态源超时"
       },
-      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/08-state-error.desktop.png"
+      "desktop_png": "docs/evidence/08-state-error.desktop.png"
     },
     {
       "step": "09-state-done",
       "note": "done 动作 cheer",
-      "window_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/09-state-done.png",
+      "window_png": "docs/evidence/09-state-done.png",
       "probe": {
-        "window_number": 7894,
+        "window_number": 8115,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -453,19 +485,23 @@
         "anchor_state": "anchor",
         "art": "done.svg",
         "caption_drawn": "xiaocc · 搞定",
+        "state_source": "demo",
+        "state_at": 1790646704.173362,
+        "state_age_s": 0.604,
+        "state_ttl_s": 12.0,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 29.3,
-        "pump_sleep_ms": 26.7,
+        "pump_loops_per_sec": 6.9,
+        "pump_sleep_ms": 16.7,
         "state": "done",
         "caption": "xiaocc · 搞定"
       },
-      "desktop_png": "/Users/a29285/ChenC/项目/xiaocc/docs/evidence/09-state-done.desktop.png"
+      "desktop_png": "docs/evidence/09-state-done.desktop.png"
     }
   ],
   "passed": 20,
   "failed": [],
-  "finished": "2026-09-29 03:09:20"
+  "finished": "2026-09-29 09:51:46"
 }
