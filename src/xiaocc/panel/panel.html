@@ -14,7 +14,6 @@ __XIAOCC_STYLE__</style>
     <span class="sub" id="fresh"></span>
     <span class="spacer"></span>
     <button class="tool" id="btn-refresh">刷新</button>
-    <button class="tool" id="btn-settings">设置</button>
     <button class="tool" id="btn-theme">皮肤</button>
     <button class="tool" id="btn-close">关闭</button>
   </div>
@@ -45,6 +44,13 @@ __XIAOCC_STYLE__</style>
     <div class="kv" id="pet"></div>
     <p class="note">这一节直接读桌宠自己写的自证据（<code>probe.json</code>），不是猜的。面板本身只读，
     只有「刷新」会去重取一次数据。</p>
+  </section>
+
+  <section>
+    <div class="label">单击小cc时显示 <span class="tag" id="tag-set"></span></div>
+    <div class="seg" id="click-actions"></div>
+    <p class="note" id="bubble-preview"></p>
+    <p class="note" id="set-note"></p>
   </section>
 
   <footer>
@@ -141,15 +147,29 @@ function render(){
     ['状态', p.state], ['画面', p.art], ['状态源', p.state_source],
     ['位置', f[0]+','+f[1]], ['尺寸', (p.view_size||[0,0])[0]+'×'+(p.view_size||[0,0])[1]],
     ['贴边', p.dock], ['锚点', p.anchor_state + (p.anchor_ok?' ✓':' ✗')],
-    ['圈速', (p.pump_loops_per_sec||0)+'/s'], ['状态已持续', ago(p.state_changed_ago_s)],
-    ['单击', {badge:'贴额度条', caption:'贴状态文案', none:'不显示'}[p.click_action] || (p.click_action||'—')],
-    ['额度条', p.badge_drawn || '没在显示'],
+    ['圈速', (p.pump_loops_per_sec||0)+'/s'], ['画帧', (p.paints_per_sec||0)+'/s'],
+    ['状态已持续', ago(p.state_changed_ago_s)],
+    ['单击', {badge:'弹额度气泡', caption:'弹状态气泡', none:'不显示'}[p.click_action] || (p.click_action||'—')],
+    ['气泡', p.badge_drawn ? (p.badge_drawn + (p.badge_alpha!=null && p.badge_alpha<1 ? '（淡化 '+p.badge_alpha+'）' : '')) : '没在显示'],
     ['进程', p.pid]
   ];
   document.getElementById('pet').innerHTML = p.alive
     ? cells.map(c => '<div>'+c[0]+' <b>'+esc(c[1])+'</b></div>').join('')
     : '<div><b>桌宠没在跑</b>（读不到 probe 或 alive=false）</div>';
   document.getElementById('tag-pet').textContent = p.alive ? ('pid '+p.pid+' · 活着') : '离线';
+
+  // 设置（就和面板同一页 —— 用户明确要求「设置和控制面板是同一个东西」）
+  const S = DATA.settings || {};
+  const labels = S.labels || {};
+  const cur = S.click_action || 'badge';
+  document.getElementById('tag-set').textContent = S.path ? S.path.split('/').pop() : 'settings.json';
+  document.getElementById('click-actions').innerHTML = (S.actions||['badge','caption','none'])
+    .map(a => '<button data-act="'+esc(a)+'" class="'+(a===cur?'on':'')+'">'+esc(labels[a]||a)+'</button>').join('');
+  document.getElementById('bubble-preview').innerHTML =
+    '气泡里写的是：<b>' + esc(S.bubble_preview || '—') + '</b>';
+  document.getElementById('set-note').innerHTML = (S.problems && S.problems.length)
+    ? '设置文件有问题：' + esc(S.problems.join('；')) + '（已按默认值用）'
+    : '改完立刻生效 —— 桌宠每 5 秒重读一次设置，不用重启它。气泡在屏上停 5 秒，最后 1.2 秒淡出。';
 
   document.getElementById('foot-left').textContent = '下一轮约 ' +
      (meta.age_s==null ? '—' : Math.max(1, Math.round((900 - meta.age_s)/60)) + ' 分钟后');
@@ -165,7 +185,6 @@ function post(action, extra){
 }
 
 document.getElementById('btn-refresh').addEventListener('click', () => post('refresh'));
-document.getElementById('btn-settings').addEventListener('click', () => post('page', {value:'settings'}));
 document.getElementById('btn-close').addEventListener('click', () => post('close'));
 document.getElementById('btn-theme').addEventListener('click', () => {
   const next = document.documentElement.dataset.theme === 'night' ? 'paper' : 'night';
@@ -183,6 +202,10 @@ document.getElementById('seg-all').addEventListener('click', () => {
   document.getElementById('seg-all').classList.add('on');
   document.getElementById('seg-default').classList.remove('on');
   render();
+});
+document.getElementById('click-actions').addEventListener('click', (ev) => {
+  const b = ev.target.closest('button[data-act]');
+  if(b){ post('save', {click_action: b.dataset.act}); }
 });
 document.body.addEventListener('click', (ev) => {
   const a = ev.target.closest('a[data-url]');

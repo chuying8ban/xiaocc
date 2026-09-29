@@ -27,7 +27,7 @@ import math
 import os
 import tempfile
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -37,7 +37,7 @@ from ..characters import Character
 from ..engine import Render
 from ..protocol import STATE_TTL, State
 from ..quota import default_quota_path
-from ..quota.badge import badge_candidates
+from ..quota.badge import badge_bubble_candidates
 from ..quota.store import load as load_quota_report
 from . import appkit_art
 from . import window_layout as wl
@@ -70,6 +70,7 @@ try:  # PyObjC 只在真的要用这个显示层时才需要
         NSGraphicsContext,
         NSImage,
         NSLineBreakByTruncatingTail,
+        NSMakePoint,
         NSMakeRect,
         NSMenu,
         NSMenuItem,
@@ -142,8 +143,17 @@ _TAP_SLOP = 3.0  #: 按下到松开的位移 ≤ 这么多像素就算「点击�
 #: （默认弹额度条），0.6 只比双击间隔 0.5 大 0.1s —— 慢慢点一下（0.6~1.2s 很正常的手感）
 #: 以前最多「什么都不做」，现在会变成「点了没反应」。真正的分布等点击日志攒出来再定。
 _TAP_MAX_HOLD_S = 1.5
-#: 额度条/文案条这类「看一眼」的东西在这里贴几秒（不进引擎、不改 state）
-_BADGE_TTL_S = 8.0
+#: 对话气泡在屏上停留几秒（用户指定 5 秒；不进引擎、不改 state）
+_BADGE_TTL_S = 5.0
+#: 最后这一小段里从 1.0 淡到 0.0（用户要「淡化消失」，不是啪一下没了）
+_BADGE_FADE_S = 1.2
+#: 气泡几何：两行文字 + 朝上指向角色的尖角。**气泡画在窗口内、窗口尺寸一个字不动** ——
+#: 长高窗口会碰到「除用户拖动外任何位移都算 bug ⇒ 回锚 + 留痕」那套自检和 anchor_ok 判据。
+_BUBBLE_PAD_X = 6.0
+_BUBBLE_BOTTOM = 2.0
+_BUBBLE_BODY_H = 40.0
+_BUBBLE_TAIL_H = 7.0
+_BUBBLE_LINE_H = 15.0
 #: 设置文件的重读周期（只 stat 一下 mtime，变了才真读）
 _SETTINGS_POLL_S = 5.0
 _DRAG_BUTTON_UP_GRACE = 0.08
@@ -290,13 +300,6 @@ class _MenuTarget(NSObject):
     def openPanel_(self, _sender):
         self._backend._open_panel()
 
-    def showBadge_(self, _sender):
-        self._backend._show_badge()
-
-    def openSettings_(self, _sender):
-        self._backend._open_settings()
-
-
 class AppKitBackend(Backend):
     """macOS 原生窗口显示层。用法：``xiaocc run --backend appkit``。
 
@@ -400,11 +403,17 @@ class AppKitBackend(Backend):
         #: 当前设置（★唯一来源 ~/.xiaocc/settings.json，见 xiaocc.settings）
         self._settings = settings_store.load()
         self._settings_mtime: float | None = None
-        #: 额度条/文案条：文字、截止时刻、**真的画上去的那份**（自证据用，别和 caption 混）
+        #: 对话气泡：行、截止时刻、**真的画上去的那份**（自证据用，别和 caption 混）
+        self._badge_lines: list[str] = []
         self._badge_text = ""
         self._badge_until = 0.0
         self._badge_drawn = ""
         self._badge_dirty = False
+        #: 真画下去多少帧（每秒结算）—— 用来把「5% 还是 1.9%」那两档钉死：5% 那几拍若是
+        #: 15 帧/秒、安静态是 0~3，差别就全在指纹闸上；两边一样就得往别处查（@researcher 的建议）。
+        self._paints = 0
+        self._paints_window_start = self._started
+        self._paints_per_sec = 0.0
         self._menu_target: Any = None
         #: 光标当前是否落在热区 —— 由 :meth:`_poll` 维护，指纹要用
         self._cursor_hot = False
@@ -709,6 +718,11 @@ class AppKitBackend(Backend):
             #: 单独一个字段的理由：``caption_drawn`` 的语义被截图套件的「待机时不挂文案」断言守着，
             #: 拿它去挂额度等于把一条早就验过的守卫悄悄废掉（同 MATCH / --linger 那两次）。
             "badge_drawn": self._badge_drawn,
+            #: 气泡当前不透明度（淡化中会从 1.0 掉到 0.0）—— 判据要看「淡化中指纹逐帧变」，
+            #: 这个数就是那件事的可读证据
+            "badge_alpha": round(self._badge_alpha(), 2),
+            #: 真正画下去多少帧/秒（@researcher 那个零成本判定实验：一个数就能把两档 CPU 钉死）
+            "paints_per_sec": self._paints_per_sec,
             #: 单击小cc 时按设置做什么（badge / caption / none）—— 取自 settings.json
             "click_action": self._click_action(),
             #: —— 状态新鲜度的自证据：doctor 从进程外判「画面是不是卡在某个状态不动」
@@ -931,7 +945,8 @@ class AppKitBackend(Backend):
             if time.monotonic() - self._settings_checked_at >= _SETTINGS_POLL_S:
                 self._settings_checked_at = time.monotonic()
                 self._reload_settings()
-            # 额度条出现/消失也要重画一次（它自己带 TTL，但到点那一刻得有人触发重绘）
+            # 气泡出现/淡化/消失都要重画（TTL 与淡化进度都在指纹里，到点那一刻得有人推一把）
+            self._expire_badge()
             badge_dirty = self._badge_dirty
             self._badge_dirty = False
             changed = self._poll() or badge_dirty
@@ -965,6 +980,9 @@ class AppKitBackend(Backend):
             self._pump_loops_per_sec = round(self._pump_loops / elapsed, 1)
             self._pump_loops = 0
             self._pump_window_start = now
+            self._paints_per_sec = round(self._paints / elapsed, 1)
+            self._paints = 0
+            self._paints_window_start = now
 
     def _paint(self, force: bool = False) -> None:
         """重画一帧。``displayIfNeeded()`` 是同步整窗重绘，画面没变就别白画。
@@ -994,6 +1012,7 @@ class AppKitBackend(Backend):
         self._last_fingerprint = fingerprint
         self._view.setNeedsDisplay_(True)
         self._window.displayIfNeeded()
+        self._paints += 1  # 真画下去了才计数（被指纹闸跳过的那几次不算）
 
     def _fingerprint(self) -> tuple[Any, ...] | None:
         """「这一帧真要画什么」的指纹：指纹一致 = 画面一致 = 可以跳过重绘。
@@ -1018,7 +1037,11 @@ class AppKitBackend(Backend):
         return (
             frame.state,
             frame.caption,
-            self._badge_text if self._badge_active() else "",  # 额度条出现/消失/换字都要重画
+            # 气泡：出现/换字/消失要重画，**淡化进度也必须进指纹** —— 只带文字的话，淡化中
+            # 文字一个字不变 ⇒ 指纹不变 ⇒ `_paint` 直接 return ⇒ 气泡卡在第一帧透明度上、
+            # 5 秒后硬切消失，正好是用户要避免的那种「啪一下没了」。alpha 量化到两位小数
+            # （同 animation 那条 round(..., _POSE_PRECISION) 的做法），既能逐帧变、又吃得掉抖动。
+            self._badge_signature() if self._badge_active() else "",
             self._dock.state,
             self._dock.edge,
             handle,
@@ -1226,7 +1249,7 @@ class AppKitBackend(Backend):
         if action == "badge":
             self._show_badge()
         elif action == "caption":
-            self._show_badge(text=self._current_caption())
+            self._show_badge(lines=[self._current_caption()])
         else:
             self._hide_badge()
             log.debug("单击：设置是「不显示」，什么都不做")
@@ -1237,34 +1260,56 @@ class AppKitBackend(Backend):
             return ""
         return frame.caption or character.spec(frame.state).caption or ""
 
-    def _show_badge(self, text: str | None = None) -> None:
-        """贴一条 8 秒的额度条（或设置里选的那个动作）。不碰引擎、不改 state。"""
-        if text is None:
-            text = self._quota_badge_text()
-        self._badge_text = text
+    def _show_badge(self, lines: Sequence[str] | None = None) -> None:
+        """弹一枚 5 秒的对话气泡（默认额度；也可以是设置里选的「状态文案」）。不碰引擎、不改 state。
+
+        行数由 :func:`xiaocc.quota.badge.badge_bubble_candidates` 按气泡可用宽度挑（最长那句放不下
+        就退到更短的一条），所以气泡里不会出现「第一行撑满、第二行只剩两个字」的半句话。
+        """
+        if lines is None:
+            lines = self._quota_badge_lines()
+        picked = [str(line) for line in lines if str(line).strip()][:2]
+        if not picked:
+            return
+        self._badge_lines = picked
+        self._badge_text = " / ".join(picked)
         self._badge_until = time.monotonic() + _BADGE_TTL_S
         self._badge_dirty = True
-        log.info("额度条：%s（%gs 后自动消失）", text, _BADGE_TTL_S)
+        log.info(
+            "气泡：%s（%gs 后开始淡化，共 %.1fs）",
+            self._badge_text,
+            _BADGE_TTL_S - _BADGE_FADE_S,
+            _BADGE_TTL_S,
+        )
 
     def _hide_badge(self) -> None:
-        if self._badge_text or self._badge_drawn:
+        if self._badge_lines or self._badge_drawn:
+            self._badge_lines = []
             self._badge_text = ""
             self._badge_until = 0.0
             self._badge_dirty = True
 
-    def _quota_badge_text(self) -> str:
-        """额度条那行字：读一次 ``quota.json``（本地小文件，点击才读），按能放下的最长一句。"""
+    def _expire_badge(self) -> None:
+        """淡完了就把状态收干净（否则 ``_badge_text`` 留着，指纹会永远比「安静态」多一项）。"""
+        if self._badge_lines and not self._badge_active():
+            self._badge_lines = []
+            self._badge_text = ""
+            self._badge_dirty = True
+
+    def _quota_badge_lines(self) -> list[str]:
+        """气泡里那两行：读一次 ``quota.json``（本地小文件，点击才读），挑**每行都放得下**的最长一条。"""
         try:
             # 路径在**调用时**解析（不是 import 时），回归脚本才能用 XIAOCC_QUOTA_FILE 指到假报告上
             report, meta = load_quota_report(default_quota_path())
         except Exception as exc:  # noqa: BLE001 - 读不到就如实说「未采集」
             log.warning("读额度失败：%s", exc)
-            return "额度未采集 · 点开面板看详情"
-        for candidate in badge_candidates(report, meta):
-            if self._text_fits(candidate, self._window_local.width - wl.PAD * 0.5 - 12.0):
-                return candidate
-        candidates = badge_candidates(report, meta)
-        return candidates[0] if candidates else "额度未采集 · 点开面板看详情"
+            return ["额度未采集", "点开面板看详情"]
+        candidates = badge_bubble_candidates(report, meta)
+        width = self._bubble_text_width()
+        for candidate in candidates:
+            if all(self._text_fits(line, width) for line in candidate):
+                return list(candidate)
+        return list(candidates[-1]) if candidates else ["额度未采集", "点开面板看详情"]
 
     @staticmethod
     def _text_fits(text: str, width: float) -> bool:
@@ -1291,33 +1336,34 @@ class AppKitBackend(Backend):
             log.info("设置：click_action=%s（%s）", after, path)
 
     def _right_mouse_down(self, event: Any, view: Any = None) -> None:
-        """右键 = 弹菜单（打开控制面板 / 显示额度 / 设置…）。
+        """右键 = 弹菜单。**菜单里只有一条「打开控制面板」**（用户 2026-09-29 的指令：不要菜单里
+        的「显示额度」—— 单击就能看到；设置也并进面板了，所以「设置…」那条也没了）。
 
         **必须早退**：右键不进 :meth:`_mouse_down` 那条 tap/drag 判定，否则右键会顺手把桌宠
         拖走或触发贴边收展（@ops 点出来的那条）。菜单里不做「重启/退出」—— 那个要跟 launchd
-        的 KeepAlive 策略一起定（现在配的是「只在非正常退出时拉起」），没定清楚之前不摆进去。
+        的 KeepAlive 策略一起定（现在配的是「只在非正常退出时拉起」），没定清楚之前不摆进去
+        （@ops：`KeepAlive{SuccessfulExit:false}` 下「退出」是干净退出 0 ⇒ launchd 不会拉回来，
+        用户以为退出、其实永久关掉；「重启」得走返回式收尾 + `execv`，`NSApp.terminate_` 不返回）。
         """
-        menu = NSMenu.alloc().init()
-        if self._menu_target is None:
-            self._menu_target = _MenuTarget.alloc().initWithBackend_(self)
-        for title, selector in (
-            ("打开控制面板", b"openPanel:"),
-            ("显示额度", b"showBadge:"),
-            ("设置…", b"openSettings:"),
-        ):
-            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
-            item.setTarget_(self._menu_target)
-            menu.addItem_(item)
+        menu = self._build_menu()
         location = event.locationInWindow()
         if view is not None:
             menu.popUpMenuPositioningItem_atLocation_inView_(None, location, view)
-        log.info("右键菜单已弹出（打开控制面板 / 显示额度 / 设置…）")
+        log.info("右键菜单已弹出（%s 条）", menu.numberOfItems())
 
-    def _open_settings(self) -> None:
-        self._open_panel(page="settings")
+    def _build_menu(self) -> Any:
+        """把右键菜单搭出来（单独一个方法，判据才能数条目、而不用真去点模态菜单）。"""
+        menu = NSMenu.alloc().init()
+        if self._menu_target is None:
+            self._menu_target = _MenuTarget.alloc().initWithBackend_(self)
+        for title, selector in (("打开控制面板", b"openPanel:"),):
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
+            item.setTarget_(self._menu_target)
+            menu.addItem_(item)
+        return menu
 
-    def _open_panel(self, *, page: str = "panel") -> None:
-        """打开控制面板（``page="settings"`` 则直接翻到设置页）；已经开着就刷新并抬到前面。
+    def _open_panel(self) -> None:
+        """打开控制面板；已经开着就刷新并抬到前面。
 
         面板是**独立进程**（见 :mod:`xiaocc.panel`）：这里只写一个 request 文件，不 import
         AppKit 之外的东西、不阻塞事件循环；失败也只记一行日志，绝不让桌宠跟着出事。
@@ -1325,11 +1371,11 @@ class AppKitBackend(Backend):
         try:
             from ..panel.paths import request_open
 
-            result = request_open(page=page)
+            result = request_open()
         except Exception as exc:  # noqa: BLE001 - 打不开面板不该影响桌宠本体
             log.warning("打开控制面板失败：%s", exc)
             return
-        log.info("打开控制面板（%s）：%s", page, result)
+        log.info("打开控制面板：%s", result)
 
     # —— 绘制 ————————————————————————————————————————————————————————————
 
@@ -1555,37 +1601,97 @@ class AppKitBackend(Backend):
             grip, grip.size.height / 2.0, grip.size.height / 2.0
         ).fill()
 
+    def _badge_signature(self) -> tuple[str, float]:
+        """指纹里那一条：文字 + **量化后的 alpha**（淡化进度不进去，气泡就会卡在第一帧透明度）。"""
+        return ("\n".join(self._badge_lines), round(self._badge_alpha(), 2))
+
+    def _badge_alpha(self) -> float:
+        """当前不透明度：前 ``TTL - FADE`` 秒是 1.0，最后一小段线性淡到 0.0。"""
+        remaining = self._badge_until - time.monotonic()
+        if remaining <= 0.0:
+            return 0.0
+        if remaining >= _BADGE_FADE_S:
+            return 1.0
+        return round(remaining / _BADGE_FADE_S, 3)
+
     def _badge_active(self) -> bool:
-        """额度条此刻该不该在屏上（TTL 到了就自己消失，不用定时器）。"""
-        return bool(self._badge_text) and time.monotonic() < self._badge_until
+        """气泡此刻该不该占着画面（TTL 到了、淡完了就自己退出，不用定时器）。"""
+        return bool(self._badge_lines) and self._badge_alpha() > 0.0
+
+    def _bubble_text_width(self) -> float:
+        """气泡里每行文字可用的宽度（量字用）。"""
+        return self._window_local.width - _BUBBLE_PAD_X * 2.0 - 16.0
 
     def _draw_badge(self, accent: str) -> None:
-        """单击小cc 贴的那行字（额度条 / 状态文案）。
+        """单击小cc 时贴在角色下方的那枚**对话气泡**（额度 / 状态文案）。
 
-        **走自己的通道**：只写 ``_badge_drawn``，一个字节都不碰 ``caption_drawn`` ——
-        后者被 ``appkit_screenshots.py`` 的「待机时不挂文案」断言守着（待机就 return、
-        并把它清空），拿它去挂额度等于把一条早验过的守卫悄悄废掉（今天已经栽过两次这种形状）。
+        **走自己的通道**：只写 ``badge_drawn``，一个字节都不碰 ``caption_drawn`` ——
+        后者被 ``appkit_screenshots.py`` 的「待机时不挂文案」断言守着，拿它去挂气泡等于把一条
+        早验过的守卫悄悄废掉（同 MATCH / --linger 那两次的形状）。
 
-        画在**和文案同一条带**上、并且**占据**它：两个都在时不许叠字。这条带在窗口内，
-        所以额度条永远不出屏幕，也不用改窗口尺寸（改尺寸会碰到漂移/贴边那套几何）。
+        气泡画在**窗口内**（底部那块文案带的位置）、**不改窗口尺寸**：长高窗口会碰到漂移自检
+        「除用户拖动外任何位移都算 bug ⇒ 回锚 + 留痕」和 ``anchor_ok`` 那套判据。尖角朝上指向角色，
+        所以它整枚都跟着角色走（拖到哪气泡跟到哪，不会留在原地）。
         """
-        text = self._badge_text
         self._badge_drawn = ""
-        if not text:
+        if not self._badge_lines:
             return
-        band = wl.Rect(
-            wl.PAD * 0.25,
-            self._window_local.height - wl.CAPTION_BAND - 1.0,
-            self._window_local.width - wl.PAD * 0.5,
-            wl.CAPTION_BAND + 4.0,
+        alpha = self._badge_alpha()
+        if alpha <= 0.0:
+            return
+        width = self._window_local.width - _BUBBLE_PAD_X * 2.0
+        height = _BUBBLE_BODY_H + _BUBBLE_TAIL_H
+        rect = wl.Rect(
+            _BUBBLE_PAD_X,
+            self._window_local.height - height - _BUBBLE_BOTTOM,
+            width,
+            height,
         )
-        if self._draw_badge_text(text, accent, band):
-            self._badge_drawn = text
+        if self._draw_bubble(self._badge_lines, accent, rect, alpha):
+            self._badge_drawn = " / ".join(self._badge_lines)
 
-    def _draw_badge_text(self, text: str, accent: str, band: wl.Rect) -> bool:
-        """圆角胶囊 + 居中文字，点阵化缓存（同 :meth:`_draw_caption_text` 那笔账）。"""
-        width, height = band.width, band.height
-        key = ("badge", text, accent, round(width, 1), round(height, 1))
+    @staticmethod
+    def _bubble_path(width: float, height: float) -> Any:
+        """气泡轮廓：**圆角矩形与尖角一笔成形**（所以描边会绕过尖角，不会在尖角根部横一道线）。
+
+        分两笔画的版本在深色桌面上看着像「没有尾巴的方块」—— 尖角的两个斜面没有描边、只靠
+        填色跟底色区分（实测在深色壁纸上几乎看不出来）。这里按上边 → 尖角 → 上边 → 圆角 →
+        下边 → 圆角 的顺序串一条闭合路径，描边自然把尖角勾出来。
+        """
+        radius = 10.0
+        half = 7.0
+        top = height - _BUBBLE_TAIL_H
+        apex = width / 2.0
+        path = NSBezierPath.bezierPath()
+        path.moveToPoint_(NSMakePoint(radius, top))
+        path.lineToPoint_(NSMakePoint(apex - half, top))
+        path.lineToPoint_(NSMakePoint(apex, height - 0.5))
+        path.lineToPoint_(NSMakePoint(apex + half, top))
+        path.lineToPoint_(NSMakePoint(width - radius, top))
+        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_(
+            NSMakePoint(width - radius, top - radius), radius, 90.0, 0.0
+        )
+        path.lineToPoint_(NSMakePoint(width, radius))
+        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_(
+            NSMakePoint(width - radius, radius), radius, 0.0, -90.0
+        )
+        path.lineToPoint_(NSMakePoint(radius, 0.0))
+        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_(
+            NSMakePoint(radius, radius), radius, 270.0, 180.0
+        )
+        path.lineToPoint_(NSMakePoint(0.0, top - radius))
+        path.appendBezierPathWithArcWithCenter_radius_startAngle_endAngle_(
+            NSMakePoint(radius, top - radius), radius, 180.0, 90.0
+        )
+        path.closePath()
+        path.setLineWidth_(1.0)
+        return path
+
+    def _draw_bubble(self, lines: list[str], accent: str, rect: wl.Rect, alpha: float) -> bool:
+        """圆角气泡 + 朝上尖角 + 两行居中文字。点阵化缓存（同 :meth:`_draw_caption_text` 那笔账），
+        淡化只是取缓存再按 alpha 贴一次 —— 每帧不重新光栅化。"""
+        width, height = rect.width, rect.height
+        key = ("bubble", tuple(lines), accent, round(width, 1), round(height, 1))
         image = self._bitmaps.get(key)
         if image is None:
             paragraph = NSMutableParagraphStyle.alloc().init()
@@ -1596,30 +1702,66 @@ class AppKitBackend(Backend):
                 NSForegroundColorAttributeName: self._color("#FFFFFF", 1.0),
                 NSParagraphStyleAttributeName: paragraph,
             }
-            label = NSString.stringWithString_(text)
+            labels = [NSString.stringWithString_(line) for line in lines]
 
-            def paint(w: float, h: float, label: Any = label, attributes: Any = attributes) -> None:
-                capsule = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
-                    NSMakeRect(0.5, 0.5, w - 1.0, h - 1.0), h / 2.0, h / 2.0
-                )
-                self._color("#2B2E3A", 0.88).setFill()
-                capsule.fill()
+            def paint(w: float, h: float, labels: Any = labels, attributes: Any = attributes) -> None:
+                body_h = h - _BUBBLE_TAIL_H
+                shape = self._bubble_path(w, h)
+                self._color("#2B2E3A", 0.9).setFill()
+                shape.fill()
                 self._color(accent, 0.9).setStroke()
-                capsule.setLineWidth_(1.0)
-                capsule.stroke()
-                label.drawInRect_withAttributes_(
-                    NSMakeRect(6.0, (h - 15.0) / 2.0, w - 12.0, 15.0), attributes
-                )
+                shape.stroke()
+                if len(labels) == 1:
+                    rows = [(body_h - _BUBBLE_LINE_H) / 2.0 + 1.0]
+                else:
+                    rows = [body_h - _BUBBLE_LINE_H - 4.0, 4.0]
+                for label, y in zip(labels, rows):
+                    label.drawInRect_withAttributes_(
+                        NSMakeRect(8.0, y, w - 16.0, _BUBBLE_LINE_H), attributes
+                    )
 
             image = appkit_art.pointize((width, height), paint)
-            if image is None:
-                NSString.stringWithString_(text).drawInRect_withAttributes_(self._local(band), attributes)
+            if image is None:  # 点阵化不可用：直接画，宁可不淡化也不要不显示
+                self._draw_bubble_fallback(lines, accent, rect, alpha)
                 return True
             self._bitmaps.put(key, image)
         image.drawInRect_fromRect_operation_fraction_(
-            self._local(band), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+            self._local(rect), NSZeroRect, NSCompositingOperationSourceOver, alpha
         )
         return True
+
+    def _draw_bubble_fallback(
+        self, lines: list[str], accent: str, rect: wl.Rect, alpha: float
+    ) -> None:
+        """不走点阵化时的直画版本（只在光栅缓存不可用时用到；位置/字号与缓存版一致）。"""
+        local = self._local(rect)
+        body_h = rect.height - _BUBBLE_TAIL_H
+        shape = self._bubble_path(rect.width, rect.height)
+        shift = NSAffineTransform.transform()
+        shift.translateXBy_yBy_(local.x, local.y)
+        shape.transformUsingAffineTransform_(shift)
+        self._color("#2B2E3A", 0.9 * alpha).setFill()
+        shape.fill()
+        self._color(accent, 0.9 * alpha).setStroke()
+        shape.stroke()
+        paragraph = NSMutableParagraphStyle.alloc().init()
+        paragraph.setAlignment_(NSTextAlignmentCenter)
+        paragraph.setLineBreakMode_(NSLineBreakByTruncatingTail)
+        attributes = {
+            NSFontAttributeName: NSFont.systemFontOfSize_(11.0),
+            NSForegroundColorAttributeName: self._color("#FFFFFF", alpha),
+            NSParagraphStyleAttributeName: paragraph,
+        }
+        rows = (
+            [(body_h - _BUBBLE_LINE_H) / 2.0 + 1.0]
+            if len(lines) == 1
+            else [body_h - _BUBBLE_LINE_H - 4.0, 4.0]
+        )
+        for line, y in zip(lines, rows):
+            NSString.stringWithString_(line).drawInRect_withAttributes_(
+                NSMakeRect(local.x + 8.0, local.y + _BUBBLE_TAIL_H + y, rect.width - 16.0, 15.0),
+                attributes,
+            )
 
     def _draw_caption(self, frame: Render, character: Character, accent: str) -> None:
         """底部状态文案。画在窗口内部（固定文案带），永远不出屏幕。"""

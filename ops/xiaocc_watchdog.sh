@@ -96,6 +96,24 @@ print("yes" if (d.get("dragging") is True or d.get("anchor_state") == "drag") el
 PYEOF
 }
 
+# 进程年龄：今天最容易被忽略的一条轴 —— 同一个进程前 8 分钟能读到 ~5%、之后稳稳 ~1.9%
+# （其它条件都一样：idle、圈速 15/s）。没有这一列，事后分不清"这台机器贵"还是"这一拍还在冷启动尾巴里"。
+_pid_age_s() {
+  local pid="$1"
+  "$PY" - "$pid" <<'PYEOF' 2>/dev/null || print "?"
+import subprocess, sys
+try:
+    out = subprocess.run(["ps", "-o", "etime=", "-p", sys.argv[1]], capture_output=True, text=True, check=False).stdout.strip()
+    days, rest = (out.split("-", 1) if "-" in out else ("0", out))
+    parts = [int(x) for x in rest.split(":")]
+    while len(parts) < 3:
+        parts.insert(0, 0)
+    print(int(days) * 86400 + parts[0] * 3600 + parts[1] * 60 + parts[2])
+except Exception:
+    print("?")
+PYEOF
+}
+
 # 面板自己报的状态（idle / thinking / working …）：display 解释不了的 CPU 波动多半在这条轴上，
 # 所以每个样本都带着它，事后能按 display × state 交叉看，而不是拿两种状态下的小样本互相打脸。
 _state_of_panel() {
@@ -152,9 +170,9 @@ PYEOF
 }
 
 _write_state() {  # _write_state <streak> <cpu> <空串|停掉的原因> [显示状态]
-  "$PY" - "$STATE" "$LABEL" "${1:-0}" "${2:-nan}" "${3:-}" "$THRESHOLD" "$STREAK_LIMIT" "$WINDOW" "$(_pid)" "${4:-}" "$(_state_of_panel)" <<'PYEOF' 2>/dev/null
+  "$PY" - "$STATE" "$LABEL" "${1:-0}" "${2:-nan}" "${3:-}" "$THRESHOLD" "$STREAK_LIMIT" "$WINDOW" "$(_pid)" "${4:-}" "$(_state_of_panel)" "$(_pid_age_s "$(_pid)")" <<'PYEOF' 2>/dev/null
 import json, sys, time, pathlib
-state, label, streak, cpu, note, thr, limit, window, pid, disp, pstate = sys.argv[1:12]
+state, label, streak, cpu, note, thr, limit, window, pid, disp, pstate, age = sys.argv[1:13]
 path = pathlib.Path(state)
 try:
     doc = json.loads(path.read_text())
@@ -171,6 +189,7 @@ doc.update({
     "pid": int(pid) if pid.strip().isdigit() else None,
     "display": disp.strip() or None,
     "panel_state": pstate.strip() or None,
+    "pid_age_s": int(age) if age.strip().isdigit() else None,
     "note": note.strip() or None,
 })
 doc["samples"] = (doc.get("samples") or [])[-9:] + [
@@ -181,6 +200,7 @@ doc["samples"] = (doc.get("samples") or [])[-9:] + [
         "pid": doc["pid"],
         "display": disp.strip() or None,
         "panel_state": pstate.strip() or None,
+        "pid_age_s": int(age) if age.strip().isdigit() else None,
     }
 ]
 # 原子写：同目录唯一临时名 + os.replace（直写在中途被杀/并发时留半截 JSON）

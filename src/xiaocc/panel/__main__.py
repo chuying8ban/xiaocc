@@ -15,15 +15,7 @@ import os
 import sys
 from pathlib import Path
 
-from .paths import (
-    CHILD_ENV,
-    DEFAULT_PANEL_HTML,
-    PAGES,
-    PANEL_REQUEST,
-    read_json,
-    request_open,
-    running_panel,
-)
+from .paths import CHILD_ENV, DEFAULT_PANEL_HTML, request_open, running_panel
 from .render import write_panel
 
 
@@ -32,9 +24,6 @@ def _parser() -> argparse.ArgumentParser:
         prog="xiaocc panel", description="小cc 控制面板：额度 / 本机账本 / 桌宠现状"
     )
     parser.add_argument("--theme", choices=("night", "paper"), default="night", help="皮肤")
-    parser.add_argument(
-        "--page", choices=PAGES, default=None, help="翻到哪一页（默认：跟着请求文件，没有就 panel）"
-    )
     parser.add_argument("--request", action="store_true", help="只请求打开/抬到前面（桌宠入口用）")
     parser.add_argument(
         "--dump", type=Path, metavar="FILE", help="只渲染到这个文件，不起窗口"
@@ -56,13 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.probe is not None:
         quota_kwargs["probe_path"] = args.probe
 
-    if args.page is None:
-        wanted = read_json(PANEL_REQUEST).get("page")
-        args.page = wanted if wanted in PAGES else "panel"
-
     if args.dump is not None:
         try:
-            path = write_panel(args.dump, theme=args.theme, page=args.page, **quota_kwargs)
+            path = write_panel(args.dump, theme=args.theme, **quota_kwargs)
         except OSError as exc:
             print(f"渲染失败：{exc}", file=sys.stderr)
             return 1
@@ -72,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.request and os.environ.get(CHILD_ENV) != "1":
         # 只有「谁都没在开」时才走到这里拉一个；被 request_open 拉起来的子进程带着
         # CHILD_ENV 标记，直接往下走开自己的窗口 —— 不然它会再拉一个孙子（实测 3 个窗口）。
-        result = request_open(theme=args.theme, page=args.page)
+        result = request_open(theme=args.theme)
         if result == "raised":
             pid = running_panel()
             print(f"面板已经开着（pid {pid}），已请求它刷新并抬到前面")
@@ -89,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"打不开窗口（缺 AppKit/WebKit？）：{exc}", file=sys.stderr)
         print(f"想要不显窗口的那份页面：xiaocc panel --dump {args.out}", file=sys.stderr)
         return 2
-    return open_panel(theme=args.theme, page=args.page, out_path=args.out, **quota_kwargs)
+    return open_panel(theme=args.theme, out_path=args.out, **quota_kwargs)
 
 
 if __name__ == "__main__":

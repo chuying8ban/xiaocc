@@ -28,14 +28,12 @@ from ..quota import refresh as refresh_quota
 from .paths import (
     DEFAULT_PANEL_HTML,
     DEFAULT_PROBE_PATH,
-    PAGES,
     PANEL_REQUEST,
     PANEL_STATE,
     REQUEST_POLL_S,
-    read_json,
     release_spawn_lock,
 )
-from .render import render_page, write_panel
+from .render import build_payload, render_html, write_panel
 
 log = logging.getLogger("xiaocc.panel")
 
@@ -60,7 +58,6 @@ def _load_kit():  # pragma: no cover - 需要窗口服务器
 def open_panel(
     *,
     theme: str = "night",
-    page: str = "panel",
     settings_path: Path | None = None,
     quota_path: Path | None = None,
     probe_path: Path | None = None,
@@ -69,7 +66,8 @@ def open_panel(
 ) -> int:  # pragma: no cover - 需要窗口服务器
     """起窗口、跑事件循环，窗口关掉才返回（退出码 0）。
 
-    一个进程一个窗口，页面（``panel`` / ``settings``）在上面翻 —— 不为设置再拉第二个窗口，
+    一个进程一个窗口、**一页** —— 设置就长在额度页上（用户 2026-09-29 的指令：设置和控制面板
+    是同一个东西），所以也没有「换页要不要开新窗口」那个坑了。
     否则「一次点击开三个窗口」那个坑（子生孙）会以另一种形状回来。
     """
     AppKit, WebKit, objc = _load_kit()
@@ -79,17 +77,15 @@ def open_panel(
     out_path = Path(out_path or DEFAULT_PANEL_HTML)
     request_path = Path(request_path or PANEL_REQUEST)
     settings_path = Path(settings_path) if settings_path else settings_store.settings_path()
-    if page not in PAGES:
-        page = "panel"
 
-    def render_page_now(which: str, theme_now: str) -> str:
-        """渲染某一页 → 返回 HTML，并顺手落一份到磁盘（想在浏览器里看时直接打开）。"""
-        html = render_page(
-            which,
-            quota_path=quota_path,
-            probe_path=probe_path,
-            theme=theme_now,
-            settings_path=settings_path,
+    def render_page_now(theme_now: str) -> str:
+        html = render_html(
+            build_payload(
+                quota_path=quota_path,
+                probe_path=probe_path,
+                theme=theme_now,
+                settings_path=settings_path,
+            )
         )
         try:
             write_panel(
@@ -97,7 +93,7 @@ def open_panel(
                 quota_path=quota_path,
                 probe_path=probe_path,
                 theme=theme_now,
-                page=which,
+                settings_path=settings_path,
             )
         except OSError:
             pass
@@ -111,7 +107,6 @@ def open_panel(
             if self is None:
                 return None
             self._theme = initial_theme
-            self._page = page
             self._window = None
             self._web = None
             self._last_request = 0.0
@@ -119,7 +114,7 @@ def open_panel(
             return self
 
         def render_now(self) -> str:
-            return render_page_now(self._page, self._theme)
+            return render_page_now(self._theme)
 
         # —— 页面 → 宿主 —
         def webView_didFinishNavigation_(self, webview, _navigation):
@@ -173,12 +168,6 @@ def open_panel(
             elif action == "save":
                 # 设置页点选项 → 落盘 → 重渲染（页面自己就是「当前的被选中」那份证据）
                 self._save_settings(body)
-            elif action == "page":
-                value = body.get("value")
-                if value in PAGES:
-                    self._page = value
-                    self._write_state()
-                    self._reload()
             elif action == "close":
                 self._close()
             elif action == "open":
@@ -212,14 +201,11 @@ def open_panel(
                 return 0.0
 
         def _request_is_new(self) -> bool:
-            """桌宠那侧写了新请求？新请求里可以带页名（右键「设置…」= 翻到设置页）。"""
+            """桌宠那侧写了新请求（点了桌宠，或右键菜单「打开控制面板」）？有就刷新 + 抬到前面。"""
             mtime = self._seen_request()
             if mtime <= self._last_request + 1e-6:
                 return False
             self._last_request = mtime
-            wanted = read_json(request_path).get("page")
-            if isinstance(wanted, str) and wanted in PAGES:
-                self._page = wanted
             return True
 
         def _write_state(self) -> None:
@@ -231,7 +217,6 @@ def open_panel(
                             "pid": os.getpid(),
                             "at": time.time(),
                             "theme": self._theme,
-                            "page": self._page,
                         },
                         ensure_ascii=False,
                     ),

@@ -93,7 +93,13 @@ def badge_bubble_candidates(
         return [["额度未采集", "点开面板看详情"]]
     age = meta.get("age_s")
     if meta.get("stale") or (isinstance(age, (int, float)) and age > STALE_AGE_S):
-        return [["余额数据陈旧", f"{_ago(age)}未更新"], ["余额数据陈旧", _ago(age)]]
+        # 两行的候选都要带「未更新」这个「别信它」的字：只写 `_ago(age)`（"60 分钟前"）会把
+        # 提醒丢掉 —— 那半句话存在的意义就是别让人把陈旧数字当真数（@writer 逐行挑出来的）。
+        return [
+            ["余额数据陈旧", f"{_ago(age)}未更新"],
+            ["余额数据陈旧", "未更新"],
+            ["余额数据陈旧"],
+        ]
     services = report.get("services") or []
     for service in services:
         if service.get("state") != "ok":
@@ -113,4 +119,11 @@ def badge_bubble_candidates(
             [amount, ago],
             [amount],
         ]
-    return [["没有可自动获取的", "余额 · 去控制台看"], ["没有可自动获取的余额"]]
+    # **不许**把这句话拆成「没有可自动获取的 / 余额」—— 这段代码存在的理由就是
+    # 「到了两行版式里会变成半句话」，它自己第一个犯（@writer 拿真 quota.json 跑出来的）。
+    # 第一行给结论、第二行给动作；最后那条是保底（160px 下短句还能整句读出来）。
+    return [
+        ["没有可自动获取的余额", "去控制台看"],
+        ["没有可自动获取的余额"],
+        ["去控制台看"],
+    ]

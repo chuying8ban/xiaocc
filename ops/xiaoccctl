@@ -73,6 +73,9 @@ _log() {
 
 _loaded() { launchctl print "$DOMAIN/$LABEL" >/dev/null 2>&1 }
 _pid()    { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pid = /{print $3; exit}' }
+# 进程年龄：冷启动尾巴挺长（实测同一进程前 ~8 分钟 ~5%、之后 ~1.9%），不留这列就分不清
+# "这版更费"和"这一拍还在暖机"。留痕里带着它，历史数字才有可比性。
+_age_hms() { ps -o etime= -p "$1" 2>/dev/null | tr -d ' ' }
 _corner() { /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST_DST" 2>/dev/null || print '?' }
 _installed() { [[ -f "$PLIST_DST" ]] }
 
@@ -561,7 +564,7 @@ cmd_gate() {
   if [[ "$disp" == "醒着" ]]; then cpu_line=7.0; else cpu_line=5.0; fi
   print "== 门槛测量：${secs}s 稳态 CPU + 外部画面判据 / 显示状态：${disp}（判据①线 <${cpu_line}%）=="
   cpu=$(_cpu_pct "$pid" "$secs")
-  print "  A) CPU：${cpu}%（门槛 <${cpu_line}%，档=${disp}）"
+  print "  A) CPU：${cpu}%（门槛 <${cpu_line}%，档=${disp}，进程年龄=$(_age_hms "$pid")）"
 
   probe_out=$("$ENTRY" probe 2>&1); probe_rc=$?
   motion=$(_motion_json "$pid" 3 0.7)
@@ -595,7 +598,7 @@ cmd_gate() {
 
   if (( cpu_ok == 1 && motion_ok == 1 && busy == 0 )); then
     print "== 门槛通过：CPU ${cpu}% <${cpu_line}%（档=${disp}）且画面真在动 =="
-    _log "gate: 通过 cpu=${cpu}% 线=${cpu_line}% 档=${disp} motion=${m_changed}(${m_pct}%) 圈速=${loops:-?}"
+    _log "gate: 通过 cpu=${cpu}% 线=${cpu_line}% 档=${disp} 年龄=$(_age_hms "$pid") motion=${m_changed}(${m_pct}%) 圈速=${loops:-?}"
     return 0
   fi
   if (( motion_ok == -1 )); then
@@ -607,7 +610,7 @@ cmd_gate() {
   fi
   print "== 门槛不通过 ==（CPU ${cpu}% 对线 ${cpu_line}% 达标=${cpu_ok}、画面在动=${motion_ok}、忙等护栏=${busy}）"
   (( busy == 1 )) && print "  ⚠️ 圈速 ${loops}/s 远超 fps ${fps} —— 又退回忙等，别用 CPU 数字掩盖它"
-  _log "gate: 不通过 cpu=${cpu}% 线=${cpu_line}% 档=${disp} motion=${m_changed}(${m_pct}%) 圈速=${loops:-?} busy=${busy}"
+  _log "gate: 不通过 cpu=${cpu}% 线=${cpu_line}% 档=${disp} 年龄=$(_age_hms "$pid") motion=${m_changed}(${m_pct}%) 圈速=${loops:-?} busy=${busy}"
   return 4
 }
 

@@ -90,7 +90,6 @@ def _build_parser() -> argparse.ArgumentParser:
 
     panel = sub.add_parser("panel", help="控制面板：额度 / 本机账本 / 桌宠现状（WKWebView）")
     panel.add_argument("--theme", choices=("night", "paper"), default="night", help="皮肤")
-    panel.add_argument("--page", choices=("panel", "settings"), default=None, help="翻到哪一页")
     panel.add_argument("--request", action="store_true", help="只请求打开/抬到前面（桌宠入口用）")
     panel.add_argument("--dump", type=Path, metavar="FILE", help="只渲染到这个文件，不起窗口")
     panel.add_argument("--out", type=Path, default=None, help="窗口那份 HTML 落在哪")
@@ -444,8 +443,6 @@ def main(argv: list[str] | None = None) -> int:
         from .panel.__main__ import main as panel_main
 
         argv: list[str] = ["--theme", args.theme]
-        if args.page:
-            argv += ["--page", args.page]
         if args.request:
             argv.append("--request")
         if args.dump is not None:

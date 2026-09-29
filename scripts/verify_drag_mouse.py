@@ -295,7 +295,8 @@ def check_tap_opens_panel(backend, number: int) -> None:
 
 
 def check_click_gestures(backend, number: int) -> None:
-    """⑨~⑭ 单击出额度 / 双击开面板 / 慢点不算点击 / 设置能换动作 / 右键不进拖拽。
+    """⑨~㉑ 单击弹气泡 / 双击开面板 / 慢点不算点击 / 设置能换动作 / 右键不进拖拽 /
+    菜单只剩一条 / 气泡两行且放得下 / 5 秒 + 淡化（淡化中指纹必须逐帧变）。
 
     为什么这几条必须走**真机同一条处理函数路径**：这三种手势是从同一串
     ``mouseDown_/mouseUp_`` 事件上分出来的，拿「直接调 _show_badge()」去验等于验了个别的。
@@ -304,6 +305,7 @@ def check_click_gestures(backend, number: int) -> None:
     import json as _json
 
     from xiaocc import settings as settings_store
+    from xiaocc.backends import appkit
     from xiaocc.panel import paths
 
     req = paths.PANEL_REQUEST
@@ -417,13 +419,69 @@ def check_click_gestures(backend, number: int) -> None:
         (not backend._dragging) and abs(before.x - after.x) < 0.5 and abs(before.y - after.y) < 0.5,
         f"dragging={backend._dragging} {before.x:.1f}→{after.x:.1f}",
     )
+    menu = backend._build_menu()
+    titles = [str(menu.itemAtIndex_(i).title()) for i in range(menu.numberOfItems())]
+    _check(
+        "⑯右键菜单只剩「打开控制面板」一条（用户明确不要菜单里的显示额度；设置已并进面板）",
+        titles == ["打开控制面板"],
+        f"菜单条目={titles}",
+    )
     backend._open_panel()
     backend.linger(0.05)
-    _check("⑯菜单「打开控制面板」⇒ 请求到面板", req.exists(), f"{req.name} exists={req.exists()}")
-    backend._open_settings()
-    backend.linger(0.05)
-    page = _json.loads(req.read_text(encoding="utf-8")).get("page")
-    _check("⑰菜单「设置…」⇒ 请求翻到设置页", page == "settings", f"request.page={page!r}")
+    _check("⑰菜单「打开控制面板」⇒ 请求到面板", req.exists(), f"{req.name} exists={req.exists()}")
+
+    # —— ⑱~㉑ 气泡：两行、每行放得下、5 秒、淡化（@researcher 那个「看不出错、只是没效果」的坑）——
+    settings_store.save({"click_action": "badge"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))
+    backend._reload_settings(force=True)
+    backend._hide_badge()
+    tap()
+    backend.linger(0.06)
+    probe = backend.probe()
+    drawn = str(probe.get("badge_drawn") or "")
+    lines = [part.strip() for part in drawn.split("/") if part.strip()]
+    width = backend._bubble_text_width()
+    _check(
+        "⑱单击 ⇒ 弹的是两行对话气泡（不是一条字幕），且每行都放得下（不许出现半句话）",
+        len(lines) == 2 and all(backend._text_fits(line, width) for line in lines),
+        f"badge_drawn={drawn!r} 每行宽上限={width:.0f}px",
+    )
+    # 5 秒 + 最后一段淡化：把截止时刻拨到淡化窗口里，指纹必须**逐帧变**（只带文字的话它不变
+    # ⇒ _paint 直接 return ⇒ 气泡卡在第一帧透明度、5 秒后硬切，正是要避免的观感）
+    backend._badge_until = time.monotonic() + 0.6 * appkit._BADGE_FADE_S
+    alpha_a = backend.probe().get("badge_alpha")
+    fp_a = backend._fingerprint()
+    backend.linger(0.12)
+    alpha_b = backend.probe().get("badge_alpha")
+    fp_b = backend._fingerprint()
+    _check(
+        "⑲淡化中指纹逐帧在变（不变量就永远不会重画 ⇒ 淡化静默失效）",
+        fp_a != fp_b and alpha_a != alpha_b and 0.0 < float(alpha_b or 0) < 1.0,
+        f"alpha {alpha_a}→{alpha_b}，指纹 {'变了' if fp_a != fp_b else '没变'}",
+    )
+    # 淡完之后：气泡要从画面上、从状态里都退干净（否则指纹永远比安静态多一项、重绘不停）
+    live_sig = backend._badge_signature()  # 此刻气泡还挂着（alpha>0）——退干净后它必须消失
+    backend._badge_until = time.monotonic() - 0.01
+    backend.linger(0.08)
+    backend._expire_badge()
+    idle_fp = backend._fingerprint()
+    probe = backend.probe()
+    # 指纹整条不能直接比两次：动画相位/光标热区这些项本来就会随时间变。要比的是**气泡那一项**
+    # ——「还拿着气泡时的签名」必须已经不在里面，且它换成了空档（否则重绘不会停）。
+    _check(
+        "⑳淡完 ⇒ 气泡从画面与状态里都退干净（badge_drawn 空、指纹里那一项回到空档）",
+        (not probe.get("badge_drawn"))
+        and not backend._badge_lines
+        and not backend._badge_active()
+        and (live_sig not in idle_fp)
+        and ("" in idle_fp),
+        f"badge_drawn={probe.get('badge_drawn')!r} alpha={probe.get('badge_alpha')} "
+        f"lines={backend._badge_lines!r} 气泡签名还在指纹里={live_sig in idle_fp}",
+    )
+    _check(
+        "㉑气泡在屏上 5 秒（用户指定），最后 1.2 秒用来淡化",
+        (appkit._BADGE_TTL_S, appkit._BADGE_FADE_S) == (5.0, 1.2),
+        f"TTL={appkit._BADGE_TTL_S} 淡化={appkit._BADGE_FADE_S}",
+    )
 
 
 
