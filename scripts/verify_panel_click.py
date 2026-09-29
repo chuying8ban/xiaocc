@@ -11,6 +11,7 @@
      ⇒ 改成 ``dict(body)``。
 
 判据（全部真窗口、真点击、真落盘）：
+  ⓪设备卡：首帧那格「采集中」会**自己填成真数**（补帧落在 ~1.2s；不许停在「未取到」）
   ①「设备状态」⇒ 沙箱 settings.json 的 click_action 变 device
   ② 页面上的选中态跟着走（.on 落在 device 上，不是只看文件）
   ③ 点回「额度」⇒ 变回 badge（双向都验，免得只对一次）
@@ -111,6 +112,22 @@ def main() -> int:
         except (OSError, ValueError):
             return "读不到"
 
+    def step0(_t=None) -> None:
+        """先等补帧落地再看页面 —— 补帧是一次整页重渲染，正好落在 step1 那个时刻就会把
+        ①的读取打断（这条门禁今天真的偶发红过一次 6/7：**判据没错、是它自己在跟重渲染抢**）。
+        """
+        js("document.getElementById('dev').innerText.replace(/\\n/g, ' | ')", sink, "dev0")
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.5, False, step_dev)
+
+    def step_dev(_t=None) -> None:
+        text = str(sink.get("dev0", (None, None))[0] or "")
+        check(
+            "⑦设备卡：首帧写「采集中」→ 自己填成真数（不停在「未取到」）",
+            "%" in text and "未取到" not in text,
+            f"本机负载={text[:80]}",
+        )
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.4, False, step1)
+
     def step1(_t=None) -> None:
         js(SELECTED, sink, "selected0")
         NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.4, False, step2)
@@ -188,7 +205,7 @@ def main() -> int:
         refresh_err = sink.get("refresh", (None, None))[1]
         theme_value = sink.get("theme", (None, None))[0]
         check(
-            "⑦顶栏「刷新」「主题」也活着（不是只有中间那排能按）",
+            "⑧顶栏「刷新」「主题」也活着（不是只有中间那排能按）",
             refresh_err is None and theme_value in ("night", "paper"),
             f"刷新错误={refresh_err} 主题={theme_value}",
         )
@@ -199,7 +216,8 @@ def main() -> int:
         sys.stdout.flush()
         os._exit(1 if failed else 0)
 
-    NSTimer.scheduledTimerWithTimeInterval_repeats_block_(1.2, False, step1)
+    # 2.6s 才开跑：补帧（~1.2s）已经落地、页面不再重渲染，后面的点击判据不会跟它抢
+    NSTimer.scheduledTimerWithTimeInterval_repeats_block_(2.6, False, step0)
     open_panel(
         theme="night",
         settings_path=SETTINGS,
