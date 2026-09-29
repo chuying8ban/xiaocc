@@ -83,7 +83,7 @@ def test_陈锁会过期(sandbox, monkeypatch):
 
 
 def test_device_block_says_collecting_when_the_baseline_is_too_young() -> None:
-    """两种空必须分开写：**「等一秒就有」**（采集中…）不是「未取到」。
+    """两种空必须分开写：**「等一秒就有」**（采集中）不是「未取到」。
 
     用户点开面板看到「未取到」会以为坏了；而这半秒的等待是我们自己的 CPU 采样窗口造成的。
     """
@@ -94,7 +94,9 @@ def test_device_block_says_collecting_when_the_baseline_is_too_young() -> None:
         Device(taken_at=0.0, cpu_percent=None, mem_used=1, mem_total=2), wait_remaining=0.6
     )
     assert young["pending"] is True
-    assert dict(young["rows"])["CPU"] == "采集中…"
+    # 措辞**不带省略号**（@writer 量的：唯一的紧候选 `CPU 采集中 · 内存 未取到` 128.6px /
+    # 预算 132，加省略号 137.5px 直接超预算，而省略号一个字节的信息都没多给）
+    assert dict(young["rows"])["CPU"] == "采集中"
 
     stale = _device_block(Device(taken_at=0.0, cpu_percent=None), wait_remaining=0.0)
     assert stale["pending"] is False

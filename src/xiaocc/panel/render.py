@@ -84,12 +84,20 @@ def _device_block(dev: Any, *, wait_remaining: float = 0.0) -> dict[str, Any]:
     把「等一秒就有」写成「未取到」才是用户以为坏了的那种假数。
     """
     if dev is None:
-        return {"rows": [], "sampled_at": None, "pending": False}
+        return {"rows": [], "sampled_at": None, "pending": False, "cpu_missing": True}
     rows = [[title, value] for title, value in dev.lines()]
-    pending = dev.cpu_percent is None and wait_remaining > 0.0
+    cpu_missing = dev.cpu_percent is None
+    pending = cpu_missing and wait_remaining > 0.0
     if pending:
-        rows = [[title, "采集中…" if title == "CPU" else value] for title, value in rows]
-    return {"rows": rows, "sampled_at": dev.taken_at, "pending": pending}
+        # 「采集中」**不带省略号**（@writer 量的：唯一的紧候选 `CPU 采集中 · 内存 未取到`
+        # 128.6px / 预算 132，加省略号就 137.5px 直接超预算；省略号一个字节信息都没多给）
+        rows = [[title, "采集中" if title == "CPU" else value] for title, value in rows]
+    return {
+        "rows": rows,
+        "sampled_at": dev.taken_at,
+        "pending": pending,
+        "cpu_missing": cpu_missing,
+    }
 
 
 def _preview_lines(action: str, report: Any, meta: Any, device: Any) -> list[str]:

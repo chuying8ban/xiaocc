@@ -78,16 +78,19 @@ def open_panel(
     request_path = Path(request_path or PANEL_REQUEST)
     settings_path = Path(settings_path) if settings_path else settings_store.settings_path()
 
+    #: 首帧那份 payload 里 CPU 是不是空的（空就补一帧，**不管是因为什么空**）
+    first_paint: dict[str, bool] = {"cpu_missing": False}
+
     def render_page_now(theme_now: str, *, device_wait: bool = True) -> str:
-        html = render_html(
-            build_payload(
-                quota_path=quota_path,
-                probe_path=probe_path,
-                theme=theme_now,
-                settings_path=settings_path,
-                device_wait=device_wait,
-            )
+        payload = build_payload(
+            quota_path=quota_path,
+            probe_path=probe_path,
+            theme=theme_now,
+            settings_path=settings_path,
+            device_wait=device_wait,
         )
+        first_paint["cpu_missing"] = bool(payload.get("device", {}).get("cpu_missing"))
+        html = render_html(payload)
         try:
             write_panel(
                 out_path,
@@ -336,10 +339,12 @@ def open_panel(
             # 首帧**不等设备采样**（CPU 要 1s 的 tick 窗口，在这儿等就是空窗口挂一秒、
             # 而且每次打开面板都要再付一次）。那一格先写「采集中…」，基线够了再渲染一遍填真数。
             web.loadHTMLString_baseURL_(self.render_now(device_wait=False), None)
+            # 补帧的判据是「**这一帧的 CPU 是空的**」，不是「等一会儿就能有」：计数器恰好在窗口
+            # 那一刻卡住时（@coder 那条残留边界）只有按前者才会补，否则那一屏永久停在「未取到」。
             fill_delay = device_wait_remaining()
-            if fill_delay > 0:
+            if fill_delay > 0 or first_paint["cpu_missing"]:
                 AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
-                    fill_delay + 0.2, self, "fillDevice:", None, False
+                    max(fill_delay, 0.2) + 0.2, self, "fillDevice:", None, False
                 )
 
             AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(

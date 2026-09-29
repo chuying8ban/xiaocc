@@ -434,6 +434,10 @@ class AppKitBackend(Backend):
         #: 当前设置（★唯一来源 ~/.xiaocc/settings.json，见 xiaocc.settings）
         self._settings = settings_store.load()
         self._settings_mtime: float | None = None
+        #: 气泡那格的设备补数时刻（``None`` = 不用补）：点击时基线没攒够才排一次
+        self._bubble_refill_at: float | None = None
+        #: 补数时按哪一档重算字面
+        self._bubble_action: str = "badge"
         #: 对话气泡：行、截止时刻、**真的画上去的那份**（自证据用，别和 caption 混）
         self._badge_lines: list[str] = []
         self._badge_text = ""
@@ -1323,8 +1327,22 @@ class AppKitBackend(Backend):
             return
         # 设备数在**点击这一刻**采一次就冻结：气泡是每帧重画的（5 秒 ≈75 帧），把 get() 挪进
         # 绘制路径就会每 2 秒（TTL）在主线程掉一帧，而且数字跳变还会让气泡重新拆行 ⇒ 看起来在抖。
-        device = self._device.get() if action in ("device", "all") else None
-        self._show_badge(lines=self._bubble_lines(action, device))
+        #
+        # 但**不许在这里等**：CPU 要 1s 的 tick 窗口，等它就是把「单击立刻有东西出来」变成
+        # 「点一下卡一秒」（面板为完全相同的原因已经改成首帧不等）。基线没攒够就先不等、写
+        # 「CPU 采集中」，攒够了由 :meth:`_refill_bubble_device` 填进仍显示着的气泡。
+        device = None
+        pending = False
+        if action in ("device", "all"):
+            pending = self._device.wait_remaining() > 0.0
+            device = self._device.get(wait=not pending)
+        self._bubble_action = action
+        self._show_badge(lines=self._bubble_lines(action, device, device_pending=pending))
+        # 真机上几乎够不到（启动→首次交互最短 6s，@ops 全天 10 次样本），但**回归脚本会在重启后
+        # 1 秒内就点**（同一个采样窗口）——所以这一路的字面也得对：排一次补数。
+        self._bubble_refill_at = (
+            time.monotonic() + self._device.wait_remaining() + 0.15 if pending else None
+        )
 
     def _show_badge(self, lines: Sequence[str] | None = None) -> None:
         """弹一枚 5 秒的对话气泡（默认额度档）。不碰引擎、不改 state。
@@ -1349,6 +1367,7 @@ class AppKitBackend(Backend):
         )
 
     def _hide_badge(self) -> None:
+        self._bubble_refill_at = None
         if self._badge_lines or self._badge_drawn:
             self._badge_lines = []
             self._badge_text = ""
@@ -1366,7 +1385,26 @@ class AppKitBackend(Backend):
         """额度档那两行（兼容入口：菜单/回归脚本在用的老名字）。"""
         return self._bubble_lines("badge")
 
-    def _bubble_lines(self, action: str, device: Any = None) -> list[str]:
+    def _refill_bubble_device(self) -> None:
+        """基线攒够后把设备数填进**仍显示着**的气泡（气泡每帧重画，改 ``_badge_lines`` 就会重绘）。
+
+        只做一次（``_bubble_refill_at`` 立刻清掉），且只在气泡还在屏上时动手；TTL 不重置，
+        所以「5 秒后淡出」的总时长不变。
+        """
+        self._bubble_refill_at = None
+        if not self._badge_active():
+            return
+        lines = self._bubble_lines(self._bubble_action, self._device.get())
+        picked = [str(line) for line in lines if str(line).strip()][:2]
+        if picked and picked != self._badge_lines:
+            self._badge_lines = picked
+            self._badge_text = " / ".join(picked)
+            self._badge_dirty = True
+            log.info("气泡补数：%s", self._badge_text)
+
+    def _bubble_lines(
+        self, action: str, device: Any = None, *, device_pending: bool = False
+    ) -> list[str]:
         """气泡里那两行：按档位从 ``quota.badge`` 的候选里挑**每行都放得下**的最长一条。
 
         读一次 ``quota.json``（本地小文件，点击才读）。``device`` 由调用方在**点击那一刻**采好
@@ -1380,7 +1418,9 @@ class AppKitBackend(Backend):
             report, meta = None, None
             if action in ("badge", "all"):  # 这两档额度是主菜，读不到就直说
                 return ["额度未采集", "点开面板看详情"]
-        candidates = bubble_candidates(action, report=report, meta=meta, device=device)
+        candidates = bubble_candidates(
+            action, report=report, meta=meta, device=device, device_pending=device_pending
+        )
         width = self._bubble_text_width()
         for candidate in candidates:
             if candidate and all(self._text_fits(line, width) for line in candidate):
@@ -1525,6 +1565,8 @@ class AppKitBackend(Backend):
                 self._draw_art(art, self._local(body))
             else:
                 self._draw_rig(body, palette, accent, pose)
+            if self._bubble_refill_at is not None and time.monotonic() >= self._bubble_refill_at:
+                self._refill_bubble_device()  # 基线攒够了：把设备数填进仍显示着的气泡
             if self._badge_active():
                 self._last_caption_drawn = ""  # 这一帧画的是额度条，文案没上屏
                 self._draw_badge(accent)
