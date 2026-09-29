@@ -1,6 +1,8 @@
 """气泡字面的**真字体宽度回归**：逐条量「气泡里会写什么」，谁超宽就点出来。
 
-为什么单独一支笔：气泡每行可用宽是 **148px**（窗口 160 − 左右各 6），而字面是按"放得下"挑的——
+为什么单独一支笔：气泡每行可用宽**真机是 132px**（窗口 160 − 左右内边距 6×2 − 文字内缩 8×2），
+而这个数**从应用那条算法算**（`appkit.bubble_budget_for`），不在笔里另写一个——笔曾经自己写 148，
+比应用宽 16px：133~148px 的候选被它判"放得下"，真机上其实选不上。字面是按"放得下"挑的——
 一旦某条候选超宽，要么它永远选不上（白写），要么在 160px 窗口里被截成半句话。两者的共同点是
 **肉眼在代码里看不出来**，必须拿真字体量。
 
@@ -26,11 +28,15 @@ from AppKit import NSFont, NSFontAttributeName, NSString
 from Foundation import NSDictionary
 
 from xiaocc import device as device_mod
+from xiaocc.backends.appkit import bubble_budget_for
+from xiaocc.characters import load_character
 from xiaocc.quota import load
 from xiaocc.quota.badge import ACTIONS, bubble_candidates
 
-#: 气泡每行可用宽 = 窗口 160 − 左右各 6（@writer 2026-09-29 用真字体量的同一口径）
-LINE_MAX_PT = 148.0
+#: 气泡每行可用宽 —— **从应用自己的算法算**（窗口宽按角色推），别在笔里另写一个数：
+#: 2026-09-29 @writer 抓到笔写 148、而应用画字还有 8px 内缩 ⇒ 真机只有 132，笔会把 133~148px
+#: 的候选判成「放得下」。改内边距/内缩时两边**必然**一起动。
+LINE_MAX_PT = bubble_budget_for(load_character())
 FONT_SIZE = 11.0
 
 
@@ -50,7 +56,7 @@ def main() -> int:
     snap = device_mod.Sampler().get()
     print(f"-- quota.json: exists={meta.get('exists')} age={meta.get('age_s')}s stale={meta.get('stale')} --")
     print(f"-- 设备快照: {[f'{k}={v}' for k, v in snap.lines()]} --")
-    print(f"-- 每行可用宽 {LINE_MAX_PT:.0f}px（窗口 160 − 左右各 6）--")
+    print(f"-- 每行可用宽 {LINE_MAX_PT:.0f}px（窗口宽 − 气泡左右内边距 6×2 − 文字内缩 8×2，同一处算法）--")
 
     failures: list[str] = []
     for action in (*ACTIONS, "caption"):

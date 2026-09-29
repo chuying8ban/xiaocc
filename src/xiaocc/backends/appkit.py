@@ -155,8 +155,32 @@ _BUBBLE_BOTTOM = 2.0
 _BUBBLE_BODY_H = 40.0
 _BUBBLE_TAIL_H = 7.0
 _BUBBLE_LINE_H = 15.0
+#: 两行文字离气泡左右内壁的内缩（**画字和量字必须用同一个数**，见 :func:`bubble_text_width_for`）
+_BUBBLE_TEXT_INSET = 8.0
 #: 设置文件的重读周期（只 stat 一下 mtime，变了才真读）
 _SETTINGS_POLL_S = 5.0
+
+
+def bubble_text_width_for(window_width: float) -> float:
+    """气泡里每行文字可用宽度 —— **唯一一处算法**。
+
+    运行时挑候选（``AppKitBackend._bubble_text_width``）与宽度笔
+    （``scripts/measure_bubble_widths.py``）都调它。两处各写一个数就会漂：2026-09-29 @writer
+    抓到笔自己写 148（照「窗口 160 − 左右各 6」），而画字还有左右各 8px 内缩 ⇒ 真机每行只有
+    **132px**，笔会把 133~148px 的候选判成「放得下」，真机上却选不上、或选中后被截成半句话
+    （`Credits1200.00 · 9 分钟前` 134.5px 就是那条）。一处数字、多处引用，才配当判据。
+    """
+    return window_width - _BUBBLE_PAD_X * 2.0 - _BUBBLE_TEXT_INSET * 2.0
+
+
+def bubble_budget_for(character: Any) -> float:
+    """按角色算气泡每行可用宽（**不用开窗口**：宽度笔用）。
+
+    窗口宽走 ``window_layout.window_size_for`` —— 跟 ``AppKitBackend._window_size()`` 同一个函数，
+    所以笔算出来的窗口宽必然等于真机那扇窗。
+    """
+    width, _height = wl.window_size_for(character.canvas, character.default_scale)
+    return bubble_text_width_for(width)
 _DRAG_BUTTON_UP_GRACE = 0.08
 
 _IMAGE_SUFFIXES = (".png", ".svg", ".pdf", ".tiff", ".jpg", ".jpeg")
@@ -1693,8 +1717,8 @@ class AppKitBackend(Backend):
         return bool(self._badge_lines) and self._badge_alpha() > 0.0
 
     def _bubble_text_width(self) -> float:
-        """气泡里每行文字可用的宽度（量字用）。"""
-        return self._window_local.width - _BUBBLE_PAD_X * 2.0 - 16.0
+        """气泡里每行文字可用的宽度（量字用）。**算法只有一处**，见 :func:`bubble_text_width_for`。"""
+        return bubble_text_width_for(self._window_local.width)
 
     def _draw_badge(self, accent: str) -> None:
         """单击小cc 时贴在角色下方的那枚**对话气泡**（额度 / 状态文案）。
@@ -1791,7 +1815,13 @@ class AppKitBackend(Backend):
                     rows = [body_h - _BUBBLE_LINE_H - 4.0, 4.0]
                 for label, y in zip(labels, rows):
                     label.drawInRect_withAttributes_(
-                        NSMakeRect(8.0, y, w - 16.0, _BUBBLE_LINE_H), attributes
+                        NSMakeRect(
+                            _BUBBLE_TEXT_INSET,
+                            y,
+                            w - _BUBBLE_TEXT_INSET * 2.0,
+                            _BUBBLE_LINE_H,
+                        ),
+                        attributes,
                     )
 
             image = appkit_art.pointize((width, height), paint)

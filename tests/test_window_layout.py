@@ -437,6 +437,21 @@ def test_horizontal_edges_keep_center_as_is(edge):
     assert wl.body_center_to_window_center(300.0, edge) == 300.0
 
 
+def test_bubble_budget_has_one_source_of_truth():
+    """气泡每行可用宽：运行时挑选和宽度笔必须算出**同一个数**。
+
+    2026-09-29 @writer 抓到宽度笔自己写 148（照「窗口 160 − 左右各 6」），而应用画字还有左右各
+    8px 内缩 ⇒ 真机每行只有 **132px**：笔会把 133~148px 的候选判成「放得下」，真机上却选不上、
+    或选中后被截成半句话。所以窗口宽走 ``window_size_for``、内边距/内缩各只有一处常量，
+    两个数必然一起动；谁再另写一个数，这条就红。
+    """
+    from xiaocc.backends.appkit import bubble_budget_for, bubble_text_width_for
+    from xiaocc.characters import load_character
+
+    assert bubble_text_width_for(160.0) == 132.0
+    assert bubble_budget_for(load_character()) == bubble_text_width_for(160.0)
+
+
 @pytest.mark.parametrize("edge", [wl.Edge.LEFT, wl.Edge.RIGHT, wl.Edge.TOP, wl.Edge.BOTTOM])
 def test_expanded_body_is_centred_on_the_strip(edge):
     """展开后角色本体的中心必须落在把手条的中心上（这才是「定点」的直接成因）。
