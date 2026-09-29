@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>ai.hermes.xiaocc.reverify</string>
+
+	<!-- 一次性任务（@lead 定）：只在本 job 被 bootstrap 时跑一次 —— 没有 StartInterval、没有 KeepAlive，
+	     跑完 launchd 保持「已加载但不在运行」，不会被周期拉起，因此不会和看门狗叠噪音。
+	     要再补验（例如屏幕又睡了没验成），重新 bootstrap 一次即可：
+	       launchctl bootout  gui/$(id -u)/ai.hermes.xiaocc.reverify
+	       launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.hermes.xiaocc.reverify.plist -->
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/zsh</string>
+		<string>/Users/a29285/ChenC/项目/xiaocc/ops/xiaocc_reverify.sh</string>
+	</array>
+
+	<key>RunAtLoad</key>
+	<true/>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>LimitLoadToSessionType</key>
+	<string>Aqua</string>
+
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>XIAOCC_RV_WAIT_MAX</key>
+		<string>7200</string>
+		<key>XIAOCC_RV_POLL</key>
+		<string>10</string>
+		<key>XIAOCC_RV_SECS</key>
+		<string>60</string>
+	</dict>
+
+	<key>StandardOutPath</key>
+	<string>/Users/a29285/Library/Logs/xiaocc/reverify.out.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Users/a29285/Library/Logs/xiaocc/reverify.err.log</string>
+</dict>
+</plist>

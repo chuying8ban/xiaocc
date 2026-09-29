@@ -463,6 +463,44 @@ PYEOF
   fi
   # ⑫ 显示器醒睡：只报事实 —— 屏幕睡着时 CoreAnimation 停画，CPU 天然偏低，不能跟醒着的臂比
   print "ℹ ⑫ 显示器：$(_display_state)"
+  # ⑬ 状态年龄（@lead 采纳 @researcher 的矩阵）：**只提示、不判失败**；
+  #    state_ttl_s 为 null（idle/offline 这类不过期的状态）**永远不报**，否则每只正常待机的桌宠都会被报警。
+  #    容差取 +5s 而不是严格 > TTL：状态可能在引擎上次判断之后才过期，写盘周期 1s + 一拍 ≤1s，贴线会误报。
+  local pa r13
+  pa="$HOME/.xiaocc/probe.json"
+  if [[ -z "$pid" ]]; then
+    print "ℹ ⑬ 状态年龄：面板没在跑，跳过"
+  elif [[ ! -f "$pa" ]]; then
+    print "ℹ ⑬ 状态年龄：没有 probe.json（显示层太老，或面板还没跑过）"
+  else
+    r13=$("$PY" - "$pa" <<'PYEOF' 2>/dev/null
+import json, sys, time
+d = json.load(open(sys.argv[1]))
+age, ttl, sat, snap, src = d.get("state_age_s"), d.get("state_ttl_s"), d.get("state_at"), d.get("at"), d.get("state_source")
+if age is None:
+    print("OLD", d.get("state"), "", "", "")
+    raise SystemExit(0)
+verdict = "OK"
+if ttl is None:
+    verdict = "NULL"
+elif float(age) > float(ttl) + 5:
+    verdict = "STALE"
+if sat is not None and snap is not None and float(sat) > float(snap) + 5:
+    verdict = "FUTURE"
+print(verdict, f"{float(age):.1f}", "" if ttl is None else f"{float(ttl):.1f}", src or "?")
+PYEOF
+)
+    case "${r13%% *}" in
+      OLD)   print "ℹ ⑬ 状态年龄：这份 probe.json 还没有 state_age_s 字段（README §8：显示层太老，或没重启过）" ;;
+      OK)    print "ℹ ⑬ 状态年龄：$(print -r -- "$r13" | awk '{print $2}')s（源 $(print -r -- "$r13" | awk '{print $4}')，保鲜期 $(print -r -- "$r13" | awk '{print $3}')s）—— 在保鲜期内" ;;
+      NULL)  print "ℹ ⑬ 状态年龄：$(print -r -- "$r13" | awk '{print $2}')s，但该状态不过期（state_ttl_s=null，如 idle/offline）⇒ 按口径永不报警" ;;
+      STALE) print "ℹ ⑬ 状态年龄：⚠️ 已 $(print -r -- "$r13" | awk '{print $2}')s，超过保鲜期 $(print -r -- "$r13" | awk '{print $3}')s + 5s 容差（源 $(print -r -- "$r13" | awk '{print $4}')）"
+             print "   判读：可能是「源侧时间语义坏（该退档没退）」，也可能是「这个状态本来就持续这么久」——"
+             print "   若面板此刻仍显示该状态、没退成 idle/offline，说明源每拍都在刷新鲜度 ⇒ 后者（见 ops/README §8 的已知语义坑）。" ;;
+      FUTURE) print "ℹ ⑬ 状态年龄：⚠️ 源给的 state_at 比快照还新 5 秒以上 ⇒ 未来时间戳，该状态在可见未来内不可能过期" ;;
+      *)     print "ℹ ⑬ 状态年龄：读不出来（probe.json 解析失败）" ;;
+    esac
+  fi
   pline=$(grep -E "位置变化|锚点已更新|窗口漂移" "$PANEL_ERR" 2>/dev/null | tail -1)
   [[ -n "$pline" ]] && print "ℹ   最近位移留痕：${pline}"
 
@@ -563,7 +601,12 @@ cmd_arm() {
   if (( rc == 5 )); then
     if (( skip_motion == 1 )); then
       print "⚠️ 判据②不可判读，但给了 --skip-motion ⇒ 视为通过并留痕（恢复屏幕后请补跑 gate）"
-      _log "arm: --skip-motion 放行（判据②不可判读）"
+      # 欠账标记：屏幕醒着时由 ai.hermes.xiaocc.reverify 一次性任务补跑完整 gate，通过后删掉本文件。
+      # 注意：disp/cpu 是 cmd_gate 的 local，这里必须自己取一份（踩过：直接引用会 "parameter not set" 中断函数）。
+      local d p c
+      d="$(_display_state)"; p="$(_pid)"; c="$(_cpu_pct "$p" 3)"
+      "$PY" -c "import json,os,sys,time;json.dump({'ts':time.strftime('%FT%T%z'),'action':'arm-skip-motion','reason':'判据②不可判读（显示状态：'+sys.argv[1]+'）','cpu_pct':sys.argv[2],'pid':int(sys.argv[3]),'clear_by':'ai.hermes.xiaocc.reverify（屏亮补验）'},open(os.path.expanduser('~/Library/Logs/xiaocc/skip-motion.json'),'w'),ensure_ascii=False,indent=2)" "$d" "${c:-nan}" "${p:-0}"
+      _log "arm: --skip-motion 放行（判据②不可判读，欠账标记已写 skip-motion.json）"
       return 0
     fi
     print -u2 "✗ 证据不全 ⇒ 停回去（判据②没能验）。屏幕醒着时重跑 arm，或 arm $secs --skip-motion 明确只验 CPU。"

@@ -173,3 +173,30 @@ A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 过�
 **测量前务必确认只有一个面板进程**：`pgrep -f "xiaocc run"` 应为 1。
 实测踩到过三次叠在同一位置的实例（两个是 `--linger 400` 的 A/B 臂、ppid=1 的残留：owner 脚本退出后它们还在）——
 残留会同时烧 CPU、盖住窗口、污染任何「按 pid 从外面量」的结论。跑 A/B 的脚本要在自己的 `finally` 里清掉自己的臂。
+
+## 8. 状态年龄（doctor ⑬）与「屏亮补验」一次性任务
+
+**doctor ⑬ 状态年龄**（@lead 采纳 @researcher 的判读矩阵）：读 `~/.xiaocc/probe.json` 的
+`state_source/state_at/state_age_s/state_ttl_s`，**只提示、不改退出码**（提示混进门禁会让 `arm` 因为一句话就停面板）；
+`state_ttl_s` 为 `null`（idle/offline 这类不过期的状态）**永不报警**；容差 **+5s**（写盘周期 1s + 一拍 ≤1s，贴线会误报）。
+
+> **已知语义坑（第一次上真机就撞到，@coder 待改）**：实测 `state_age_s` 目前是「距显示层上次**状态变化**多久」，
+> 不是「源这次报告有多旧」—— 同一只面板上我先后读到 **74.5s（报 ⚠️）** 和 **1.0s（在期内）**。
+> 因为显示层缓存的是最后一帧的 `event`，而 `hermes` 源每拍都用 `at=now` 重新报。
+> 所以**长工具调用期间（`working` 持续 > TTL+5s）这条会狼来了**。判据：只要面板仍显示该状态、没退成 `idle/offline`，
+> 就说明源每拍都在刷新鲜度 ⇒ 不是卡死（真卡死的形态是 `pick()` 丢弃 + 引擎合成 `idle/offline`）。
+> 建议改成「最新**轮询到**的事件的年龄」，或另开一个 `state_changed_ago_s`。
+
+**「屏亮补验」一次性任务**（@lead 定：一次性，不是周期任务，别和看门狗叠噪音）：
+`ai.hermes.xiaocc.reverify` + `ops/xiaocc_reverify.sh`。屏幕睡着时 `arm --skip-motion` 会写欠账标记
+`~/Library/Logs/xiaocc/skip-motion.json`；本任务等**屏幕亮起**后补跑一次完整 `gate`：
+
+* 通过 ⇒ 写 `reverify-ok.json`（含 `changed` / `max_diff_pct` 实测数字）+ **删欠账标记**（欠账才算清）；
+* 不通过 ⇒ 写 `reverify-fail.json` + **把面板停回去**；
+* 判不了（屏幕又睡了）⇒ 只记一笔，欠账保留、面板照常跑（不误停）。
+
+装/再装：`launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/ai.hermes.xiaocc.reverify.plist`
+（`RunAtLoad`、无 `StartInterval` ⇒ 只跑一次；要再补验重新 bootstrap）。
+可调：`XIAOCC_RV_WAIT_MAX`（默认 7200s）/`XIAOCC_RV_POLL`（10s）/`XIAOCC_RV_SECS`（60s）；
+**测试接缝** `XIAOCC_RV_LOGDIR`（沙箱目录）+ `XIAOCC_RV_FORCE_AWAKE=1` + 桩 `xiaoccctl`
+—— 三条分支（通过/不通过/判不了）都用桩在沙箱里逐条验过，含「真删掉欠账标记」那一条。
