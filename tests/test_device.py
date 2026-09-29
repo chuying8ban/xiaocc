@@ -208,26 +208,39 @@ def test_sampler_cache_expires_with_its_ttl() -> None:
 
     sampler = Sampler(ttl=0.05)
     first = sampler.get()
-    # 等得比"采样窗口"(_MIN_CPU_WINDOW_S)长，否则走的是"问得太挤 ⇒ 沿用上次"那条路（那是设计）
-    time.sleep(0.7)
+    # 等得比"采样窗口"(_MIN_CPU_WINDOW_S=1.0)长：窗口不够时走的是"问得太挤 ⇒ 沿用上次"那条路（那是设计）
+    time.sleep(1.3)
     assert sampler.get() is not first  # 过期就必须重采，而不是把旧快照端上来
 
 
-def test_sampler_retries_when_tick_counter_is_frozen(monkeypatch) -> None:
-    """Mach 的 tick 计数器约 1/10 的冷启动会**连续两次读到同一个值**（delta=0）⇒ 比率算不出来。
+def test_cpu_window_is_wide_enough_that_frozen_pairs_vanish() -> None:
+    """窗口必须 ≥1s —— 这条守的是一个**量出来的常数**，不是审美。
 
-    真机采样：20 次冷启动里 2 次 `cpu_percent is None`，而 `prev_ticks` 从不为 None、
-    直接调 `cpu_ticks()` 500 次也不返回 None —— 卡住的正是"两次读数一模一样"。
-    这条要求补一次短等再读，别让用户右键第一眼看到「CPU 未取到」。
+    2026-09-29 本机 30s @0.1s 直采 287 点：窗口 0.5s 时两读数"一模一样"（delta=0）**13.8%**、
+    窗口 1.0s 时 **0.0%**（@researcher 独立采样：10.1% vs 0/562）。降回 0.5s 就等于把
+    「冷启动约 1/7 概率显示 CPU 未取到」这个 flake 放回来。
+    """
+    from xiaocc import device as device_mod
+
+    assert device_mod._MIN_CPU_WINDOW_S >= 1.0
+
+
+def test_frozen_counter_is_not_papered_over_by_a_blocking_retry(monkeypatch) -> None:
+    """计数器卡住时**不再**主线程硬等重试：等它动要 中位 110ms / p90 633ms / 最大 938ms，
+    任何预算都会落到「等满预算、最后还是印未取到」这种最差组合 ⇒ 改成抬窗口、删重试。
+
+    这条同时钉住"别把重试加回来"：加了重试的话耗时会超出窗口本身。
     """
     from xiaocc import device as device_mod
 
     frozen = (1000, 2000)
-    sequence = iter([frozen, frozen, (1010, 2100)])  # 构造 / 首次采样 / 补采
-    monkeypatch.setattr(device_mod, "cpu_ticks", lambda: next(sequence, frozen))
-    snap = device_mod.Sampler().get()
-    assert snap.cpu_percent is not None
-    assert 0.0 <= snap.cpu_percent <= 100.0
+    monkeypatch.setattr(device_mod, "cpu_ticks", lambda: frozen)
+    sampler = device_mod.Sampler()
+    started = time.monotonic()
+    snap = sampler.get()
+    elapsed = time.monotonic() - started
+    assert snap.cpu_percent is None  # 卡住就是卡住，如实说，不靠烧时间来赌
+    assert elapsed < device_mod._MIN_CPU_WINDOW_S + 0.4  # 只等了窗口，没有额外重试预算
 
 
 def test_sampler_caches_within_ttl() -> None:

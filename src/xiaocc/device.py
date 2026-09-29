@@ -32,14 +32,15 @@ TTL_S = 2.0
 #: `sysctl`/`vm_stat`/`pmset` 的超时——卡住也不能把菜单挂住
 _CMD_TIMEOUT_S = 2.0
 
-#: CPU 利用率是两个累计 tick 的差商：窗口太短算出来就是噪声（面板一打开就渲染时尤其）
-#: ⇒ 窗口短于这个值就**不报 CPU**（写「未取到」），别拿噪声当真值
-_MIN_CPU_WINDOW_S = 0.5
-
-#: tick 计数器卡住（两次读到同一个值）时的补采节奏与上限——见 `Sampler.get`。
-#: 只在"计数器没动"时才走这条，真实路径（构造后隔一会儿才问）实测 0/10 不会触发。
-_CPU_RETRY_STEP_S = 0.1
-_CPU_RETRY_BUDGET_S = 0.6
+#: CPU 利用率是两个累计 tick 的差商。**窗口必须 ≥1 秒**：Mach 的 `HOST_CPU_LOAD_INFO`
+#: 计数器不是每半秒都动——2026-09-29 本机 30s @0.1s 直采 287 点实测：
+#:   窗口 0.5s：两读数"一模一样"（delta=0 ⇒ 比率算不出来）**13.8%**（39/282）
+#:   窗口 1.0s：**0.0%**（0/278）
+#: 而"等到计数器动"要 中位 110ms / p90 633ms / 最大 938ms ⇒ 任何"主线程硬等重试"的预算
+#: 都会出现「等满预算、最后还是印未取到」这种最差组合（@researcher 也量到同一形状）。
+#: 所以这里不重试：**把窗口抬到 1 秒**，让卡住这件事从源头不成立；成本为零——
+#: 宠物右键、面板渲染这些真实调用之间本来就隔着好几秒。**别再降回 0.5s。**
+_MIN_CPU_WINDOW_S = 1.0
 
 _GB = 1024.0**3
 
@@ -420,21 +421,6 @@ class Sampler:
             now = time.monotonic()
             window = now - self._prev_at
         dev = snapshot(self._prev_ticks if window >= _MIN_CPU_WINDOW_S else None)
-        waited = 0.0
-        while (
-            dev.cpu_percent is None
-            and self._prev_ticks is not None
-            and waited < _CPU_RETRY_BUDGET_S
-        ):
-            # Mach 的 CPU tick 计数器**不是每半秒都动**：真机插桩看到的是"构造时那次读和
-            # 半秒后那次读一模一样"（delta=0 ⇒ 比率算不出来），冷启动约 1/10 会撞上。
-            # 这是"点开第一眼"那一次，给用户看「未取到」比多等几十毫秒更糟 ⇒ **等到它动为止**，
-            # 但有硬上限（只在计数器卡住时才会走到这里，真实路径实测 0/10 不会触发）。
-            time.sleep(_CPU_RETRY_STEP_S)
-            waited += _CPU_RETRY_STEP_S
-            again = snapshot(self._prev_ticks)
-            if again.cpu_percent is not None:
-                dev = again
         self._prev_ticks = cpu_ticks()
         self._prev_at = time.monotonic()
         self._cache = dev
