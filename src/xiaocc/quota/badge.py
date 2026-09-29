@@ -84,6 +84,95 @@ def badge_text(report: dict[str, Any] | None, meta: dict[str, Any] | None) -> st
     return badge_candidates(report, meta)[0]
 
 
+def _pack_candidates(parts: list[str], per_line: int = 2) -> list[list[str]]:
+    """若干「部件」→ 两行以内的**候选组**，从信息量最多退化到最少。
+
+    为什么用"前缀退化"而不是手写每一条：多写一条就多一处会和窗口宽度脱节的硬编码，
+    而调用方本来就是"按实测宽度挑第一个放得下的"。所以这里只保证三件事：最多两行、
+    第一个候选信息最全、最后一个候选一定短到放得下。
+    """
+    parts = [p for p in parts if p]
+    out: list[list[str]] = []
+    for n in range(len(parts), 0, -1):
+        sub = parts[:n]
+        lines = [" · ".join(sub[i : i + per_line]) for i in range(0, len(sub), per_line)]
+        if 1 <= len(lines) <= 2:
+            out.append(lines)
+    return out or [[]]
+
+
+def _pct(part: Any, whole: Any) -> str | None:
+    if part is None or not whole:
+        return None
+    return f"{part / whole * 100.0:.0f}%"
+
+
+def _device_parts(device: Any) -> list[str]:
+    """设备状态 → 可拼的部件（取不到的项写「未取到」，**绝不补 0**）。"""
+    if device is None:
+        return []
+    cpu = getattr(device, "cpu_percent", None)
+    mem = _pct(getattr(device, "mem_used", None), getattr(device, "mem_total", None))
+    disk = _pct(getattr(device, "disk_used", None), getattr(device, "disk_total", None))
+    battery = getattr(device, "battery", None)
+    parts = [
+        "CPU 未取到" if cpu is None else f"CPU {cpu:.0f}%",
+        "内存 未取到" if mem is None else f"内存 {mem}",
+        "磁盘 未取到" if disk is None else f"磁盘 {disk}",
+    ]
+    if battery:  # 台式机没有电池：这一项直接不出现，而不是写「未取到 0」
+        parts.append(f"电池 {int(battery[0])}%")
+    return parts
+
+
+def device_bubble_candidates(device: Any) -> list[list[str]]:
+    """设备状态那两行（CPU/内存 在上、磁盘/电池 在下），按 @writer 量的每行 148px 排。"""
+    return _pack_candidates(_device_parts(device))
+
+
+#: 旧枚举名 → 新枚举名：`settings.json` 里写着 `caption` 的机器不能因为换名字就回落默认
+_ACTION_ALIASES = {"caption": "device"}
+ACTIONS = ("badge", "device", "all", "none")
+
+
+def bubble_candidates(
+    action: str,
+    *,
+    report: dict[str, Any] | None = None,
+    meta: dict[str, Any] | None = None,
+    device: Any = None,
+) -> list[list[str]]:
+    """单击小cc 时气泡该写什么 —— **三档字面都从这里出，调用方只按宽度挑**。
+
+    ==========  ==========================================================
+    ``badge``   额度（DeepSeek ¥72.22 · 9 分钟前）
+    ``device``  电脑状态（CPU 16% · 内存 60% / 磁盘 22% · 电池 90%）
+    ``all``     两样都要：一行额度、一行设备
+    ``none``    不显示
+    ==========  ==========================================================
+
+    `caption` 当 `device` 的别名继续接受（用户 2026-09-29 把「状态文案」重定义成电脑状态，
+    旧配置里那个词要还能用）。**额度与设备的陈旧/取不到规矩同源**：取不到就是取不到，
+    不补 0、不印旧数。
+    """
+    action = _ACTION_ALIASES.get(action, action)
+    if action == "none":
+        return []
+    device_cands = device_bubble_candidates(device)
+    if action == "device":
+        return device_cands
+    quota_cands = badge_bubble_candidates(report, meta)
+    if action != "all":
+        return quota_cands
+    # 「全部」：额度一行 + 设备一行（@writer 量的那个形态）。额度那行取**紧凑形**（金额 · 时效），
+    # 找不到紧凑形就用它自己的首选整句；设备那行只取**首行**（CPU · 内存）——两行是气泡的硬上限，
+    # 把设备那档的整组（可能两行）拼进来就成了三行，超出的部分真机上会被裁掉。
+    quota_line = " · ".join(quota_cands[-2] if len(quota_cands) >= 2 else quota_cands[0])
+    device_line = device_cands[0][0] if device_cands and device_cands[0] else ""
+    combined = [[quota_line, device_line], [device_line], [quota_line]]
+    return [c for c in combined if c and c[0]]
+
+
 def badge_bubble_candidates(
     report: dict[str, Any] | None, meta: dict[str, Any] | None
 ) -> list[list[str]]:

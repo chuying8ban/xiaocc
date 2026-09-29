@@ -21,7 +21,12 @@ import pytest
 
 from xiaocc.quota import DEFAULT_QUOTA_PATH, base, collect, ledger, refresh
 from xiaocc.quota import store as quota_store
-from xiaocc.quota.badge import badge_bubble_candidates, badge_text
+from xiaocc.quota.badge import (
+    badge_bubble_candidates,
+    badge_text,
+    bubble_candidates,
+    device_bubble_candidates,
+)
 from xiaocc.quota.base import QuotaContext, read_env_file
 from xiaocc.quota.deepseek import DeepSeekAdapter, fetch_balance
 from xiaocc.quota.qianwen import QwenTokenPlanAdapter
@@ -573,6 +578,75 @@ def test_bubble_candidates_keep_the_amount_and_age():
     flat = ["".join(c) for c in cands]
     assert any("¥75.00" in line for line in flat)
     assert any("分钟前" in line for line in flat)
+
+
+# —— 9. 气泡三档（额度 / 设备 / 全部）———————————————————————————
+
+
+class FakeDevice:
+    """只带 device.Device 的那几个字段（纯函数不依赖 AppKit，也不起真采样）。"""
+
+    def __init__(self, **kw):
+        self.cpu_percent = kw.get("cpu_percent", 16.0)
+        self.mem_used = kw.get("mem_used", 14_400_000_000)
+        self.mem_total = kw.get("mem_total", 24_000_000_000)
+        self.disk_used = kw.get("disk_used", 206_000_000_000)
+        self.disk_total = kw.get("disk_total", 926_000_000_000)
+        self.battery = kw.get("battery", (90, "接电源", "未充电"))
+
+
+def test_device_candidates_two_lines_best_first():
+    cands = device_bubble_candidates(FakeDevice())
+    assert cands[0] == ["CPU 16% · 内存 60%", "磁盘 22% · 电池 90%"]
+    assert all(1 <= len(c) <= 2 for c in cands)  # 气泡硬上限两行
+    assert cands[-1] == ["CPU 16%"]
+
+
+def test_device_candidates_without_battery_skip_the_part():
+    """台式机没有电池：那一项直接不出现，而不是写「电池 未取到」。"""
+    cands = device_bubble_candidates(FakeDevice(battery=None))
+    flat = " ".join(" ".join(c) for c in cands)
+    assert "电池" not in flat
+    assert cands[0] == ["CPU 16% · 内存 60%", "磁盘 22%"]
+
+
+def test_device_candidates_say_taken_failed_never_zero():
+    """取不到就写「未取到」——不补 0（device.py 的规矩，气泡也得守）。"""
+    cands = device_bubble_candidates(
+        FakeDevice(cpu_percent=None, mem_used=None, mem_total=None, disk_used=None, disk_total=None,
+                   battery=None)
+    )
+    flat = " ".join(" ".join(c) for c in cands)
+    assert "未取到" in flat and "0%" not in flat
+
+
+def test_bubble_candidates_dispatch_and_caption_alias():
+    dev = FakeDevice()
+    meta = {"exists": True, "age_s": 480, "stale": False}
+    assert bubble_candidates("none", report=OK_REPORT, meta=meta, device=dev) == []
+    assert bubble_candidates("device", report=OK_REPORT, meta=meta, device=dev)[0][0].startswith("CPU")
+    # 旧枚举名 `caption` 必须还能用（settings.json 里写着它的机器不能回落默认）
+    assert bubble_candidates("caption", report=OK_REPORT, meta=meta, device=dev) == \
+        bubble_candidates("device", report=OK_REPORT, meta=meta, device=dev)
+    assert bubble_candidates("badge", report=OK_REPORT, meta=meta, device=dev)[0][0] == "DeepSeek"
+
+
+def test_all_action_is_one_line_quota_plus_one_line_device():
+    """「全部」= 额度一行 + 设备一行：**不许三行**（气泡只放得下两行）。"""
+    cands = bubble_candidates(
+        "all", report=OK_REPORT, meta={"exists": True, "age_s": 480, "stale": False}, device=FakeDevice()
+    )
+    assert cands[0] == ["¥75.00 · 8 分钟前", "CPU 16% · 内存 60%"]
+    assert all(1 <= len(c) <= 2 for c in cands)
+
+
+def test_all_action_survives_missing_device():
+    cands = bubble_candidates(
+        "all", report=OK_REPORT, meta={"exists": True, "age_s": 480, "stale": False}, device=None
+    )
+    assert all(c and c[0] for c in cands)
+    assert all(1 <= len(c) <= 2 for c in cands)
+    assert any("¥75.00" in "".join(c) for c in cands)
 
 
 def test_default_quota_path_is_under_xiaocc():
