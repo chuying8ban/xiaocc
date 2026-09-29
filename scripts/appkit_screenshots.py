@@ -11,7 +11,16 @@
 输出：
     <out>/NN-<name>.png        窗口本体（CGWindowList，保留透明通道）
     <out>/NN-<name>.desktop.png 同位置连着桌面一起截（证明真的浮在桌面上）
-    <out>/evidence.json        每一步的真实窗口状态 + 断言结果
+    <out>/evidence.json        每一步的真实窗口状态 + 断言结果（含 opaque_pct）
+
+两道护栏，都是为了不让**空图**冒充证据（HEAD 里 01~09 那批正是空图，断言却 20/20 全绿）：
+
+1. **屏睡拒跑**：显示器睡着时 ``CGWindowListCreateImage`` 不报错、只交回一张整幅全透明的图，
+   所以写 PNG 之前先问一句 ``CGDisplayIsAsleep``，睡着就 rc=2 退出，一张图都不落盘。
+2. **像素验收**：每张窗口截图都数一遍非透明像素占比、写进 step 的 ``opaque_pct``，
+   < 2% 判为空图 ⇒ 该步断言失败、脚本 rc=1（判据同 :mod:`scripts.pixel_stats`）。
+
+退出码：0 = 全过；1 = 有断言失败；2 = 显示器睡着，拒跑；3 = 缺 PyObjC。
 """
 
 from __future__ import annotations
@@ -74,6 +83,59 @@ def _load_quartz():
         raise SystemExit(3) from exc
 
 
+#: alpha 高于这个值才算「这个像素真的画出来了」—— 判据与 scripts/pixel_stats.py 一致。
+OPAQUE_ALPHA = 0.35
+#: 非透明像素占比低于这个百分数 ⇒ 判为空图。真窗口图实测 20%~30%（参照 8ff7304 那版的
+#: 09-state-done.png = 30.6%），屏睡交回来的空图是 0.0% —— 2% 这条线两边都碰不着。
+EMPTY_OPAQUE_PCT = 2.0
+
+
+def require_awake_display(quartz) -> None:
+    """写 PNG 前的闸门：主显示器睡着就拒跑（rc=2），一张 PNG 都不落盘。
+
+    屏睡时 :func:`CGWindowListCreateImage` **不报错**，只交回一张整幅全透明的图；而断言查的
+    是层级/尺寸/穿透这些 ``probe()`` 元数据账，压根不看像素 —— 于是一份假证据能 20/20 全绿地
+    混进 HEAD。这里只挡「真要写 PNG」这条路：纯元数据断言不需要屏亮，不该被它拦下。
+    """
+    if quartz.CGDisplayIsAsleep(quartz.CGMainDisplayID()):
+        print(
+            "拒绝抓图：显示器睡着，抓出来是空图，拒绝生成假证据。\n"
+            "  CGWindowListCreateImage 在屏睡时不报错，只交回整幅全透明的 PNG，\n"
+            "  而元数据断言照样会全绿。请唤醒屏幕（碰一下鼠标/键盘）后重跑。",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
+def opaque_pixel_pct(path: Path) -> float | None:
+    """数一张 PNG 里非透明像素的占比（百分数）；读不到或不是位图时返回 ``None``。
+
+    ``probe()`` 的账对（art=done.svg、层级、尺寸都对）≠ 像素真的画出来了，所以每张窗口截图
+    都得自己数一遍。判据照搬 :mod:`scripts.pixel_stats`：alpha > :data:`OPAQUE_ALPHA` 算不透明。
+    """
+    # PyObjC 懒加载，同 _load_quartz：本文件顶部 import 之后还有 sys.path/env 设置，
+    # 提到模块顶部就吃 E402。
+    from AppKit import NSBitmapImageRep, NSData
+
+    data = NSData.dataWithContentsOfFile_(str(path))
+    if data is None:
+        return None
+    rep = NSBitmapImageRep.imageRepWithData_(data)
+    if rep is None:
+        return None
+    width, height = int(rep.pixelsWide()), int(rep.pixelsHigh())
+    total = width * height
+    if total <= 0:
+        return None
+    opaque = 0
+    for y in range(height):
+        for x in range(width):
+            pixel = rep.colorAtX_y_(x, y)
+            if pixel is not None and pixel.alphaComponent() > OPAQUE_ALPHA:
+                opaque += 1
+    return opaque / total * 100.0
+
+
 def capture_window(quartz, window_number: int, path: Path) -> bool:
     image = quartz.CGWindowListCreateImage(
         quartz.CGRectNull,
@@ -132,15 +194,19 @@ class Driver:
         self.backend.linger(seconds)
 
     def shot(self, name: str, note: str = "", desktop: bool = True) -> dict:
+        # 本脚本唯一写 PNG 的地方 → 屏睡闸门装在这里：睡着就 rc=2，半张图都不落盘。
+        require_awake_display(self.quartz)
         self.index += 1
         info = self.backend.probe()
         stem = f"{self.index:02d}-{name}"
         window_png = self.out / f"{stem}.png"
         ok = capture_window(self.quartz, info["window_number"], window_png)
+        pct = opaque_pixel_pct(window_png) if ok else None
         record = {
             "step": stem,
             "note": note,
             "window_png": _rel(window_png) if ok else None,
+            "opaque_pct": round(pct, 3) if pct is not None else None,
             "probe": info,
         }
         if desktop:
@@ -213,9 +279,12 @@ def main() -> int:
 
     root = Path(__file__).resolve().parents[1]
     out = Path(args.out) if args.out else root / "docs" / "evidence"
-    out.mkdir(parents=True, exist_ok=True)
 
     quartz = _load_quartz()
+    # 屏睡就别开窗口了：早拒早干净 —— 不建输出目录、不渲染、一张 PNG 都不落盘。
+    # （Driver.shot 里还有同一道闸门，管的是「跑到一半屏幕才睡过去」。）
+    require_awake_display(quartz)
+    out.mkdir(parents=True, exist_ok=True)
     character = characters.load_character(args.character)
 
     driver_holder: dict = {}
@@ -334,6 +403,18 @@ def main() -> int:
                 f"{name} 用对了动作/配色",
                 info["probe"]["state"] == state.value,
                 f"state={info['probe']['state']} art={info['probe']['art']}",
+            )
+        )
+
+    # ⑥ 像素级验收：账对 ≠ 画出来了。逐张数窗口截图的非透明像素，空图不许蒙过去 ——
+    #    这一条以前没有，所以 01~09 全是空图时照样报了 20/20 全绿。
+    for record in driver.steps:
+        pct = record["opaque_pct"]
+        checks.append(
+            driver.check(
+                f"{record['step']} 不是空图（非透明像素 ≥ {EMPTY_OPAQUE_PCT:g}%）",
+                pct is not None and pct >= EMPTY_OPAQUE_PCT,
+                "读不到像素" if pct is None else f"opaque_pct={pct:.3f}%",
             )
         )
 
