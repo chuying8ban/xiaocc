@@ -5,6 +5,8 @@
 
 from __future__ import annotations
 
+import time
+
 from xiaocc.device import (
     Device,
     human_bytes,
@@ -193,6 +195,39 @@ def test_sampler_waits_once_so_first_reading_has_cpu() -> None:
     device = Sampler().get()
     assert device.cpu_percent is not None
     assert 0.0 <= device.cpu_percent <= 100.0
+
+
+def test_sampler_cache_expires_with_its_ttl() -> None:
+    """缓存判据必须用**同一个**时钟。
+
+    混用时钟这条真踩过：`Device.taken_at` 是墙上时钟，而判据拿 `time.monotonic()` 去减它 ⇒
+    差值是约 −1.79e9，**永远小于 TTL** ⇒ 缓存永不失效，右键菜单/面板会一直显示进程启动那一刻
+    的数（真机实测：隔 3 秒再问、TTL 只有 2 秒，返回的还是同一个快照对象）。
+    """
+    from xiaocc.device import Sampler
+
+    sampler = Sampler(ttl=0.05)
+    first = sampler.get()
+    # 等得比"采样窗口"(_MIN_CPU_WINDOW_S)长，否则走的是"问得太挤 ⇒ 沿用上次"那条路（那是设计）
+    time.sleep(0.7)
+    assert sampler.get() is not first  # 过期就必须重采，而不是把旧快照端上来
+
+
+def test_sampler_retries_when_tick_counter_is_frozen(monkeypatch) -> None:
+    """Mach 的 tick 计数器约 1/10 的冷启动会**连续两次读到同一个值**（delta=0）⇒ 比率算不出来。
+
+    真机采样：20 次冷启动里 2 次 `cpu_percent is None`，而 `prev_ticks` 从不为 None、
+    直接调 `cpu_ticks()` 500 次也不返回 None —— 卡住的正是"两次读数一模一样"。
+    这条要求补一次短等再读，别让用户右键第一眼看到「CPU 未取到」。
+    """
+    from xiaocc import device as device_mod
+
+    frozen = (1000, 2000)
+    sequence = iter([frozen, frozen, (1010, 2100)])  # 构造 / 首次采样 / 补采
+    monkeypatch.setattr(device_mod, "cpu_ticks", lambda: next(sequence, frozen))
+    snap = device_mod.Sampler().get()
+    assert snap.cpu_percent is not None
+    assert 0.0 <= snap.cpu_percent <= 100.0
 
 
 def test_sampler_caches_within_ttl() -> None:

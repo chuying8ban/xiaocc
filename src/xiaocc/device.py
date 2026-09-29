@@ -36,6 +36,11 @@ _CMD_TIMEOUT_S = 2.0
 #: ⇒ 窗口短于这个值就**不报 CPU**（写「未取到」），别拿噪声当真值
 _MIN_CPU_WINDOW_S = 0.5
 
+#: tick 计数器卡住（两次读到同一个值）时的补采节奏与上限——见 `Sampler.get`。
+#: 只在"计数器没动"时才走这条，真实路径（构造后隔一会儿才问）实测 0/10 不会触发。
+_CPU_RETRY_STEP_S = 0.1
+_CPU_RETRY_BUDGET_S = 0.6
+
 _GB = 1024.0**3
 
 # —— Mach：CPU 累计 tick（一次读的是累计值，两次相隔的差才是利用率）——
@@ -396,10 +401,14 @@ class Sampler:
         self._prev_ticks = cpu_ticks()
         self._prev_at = time.monotonic()
         self._cache: Device | None = None
+        #: 缓存时刻用**单调**钟：`Device.taken_at` 是墙上时钟（给人和日志看的），
+        #: 拿它跟 `time.monotonic()` 相减永远是个负数 ⇒ 缓存永不失效（真机上实测过：
+        #: 隔 3 秒再问、TTL 只有 2 秒，返回的还是**同一个快照对象**）。两个时钟不许混用。
+        self._cache_at = 0.0
 
     def get(self, *, fresh: bool = False) -> Device:
         now = time.monotonic()
-        if not fresh and self._cache is not None and now - self._cache.taken_at < self._ttl:
+        if not fresh and self._cache is not None and now - self._cache_at < self._ttl:
             return self._cache
         window = now - self._prev_at
         if window < _MIN_CPU_WINDOW_S:
@@ -411,7 +420,23 @@ class Sampler:
             now = time.monotonic()
             window = now - self._prev_at
         dev = snapshot(self._prev_ticks if window >= _MIN_CPU_WINDOW_S else None)
+        waited = 0.0
+        while (
+            dev.cpu_percent is None
+            and self._prev_ticks is not None
+            and waited < _CPU_RETRY_BUDGET_S
+        ):
+            # Mach 的 CPU tick 计数器**不是每半秒都动**：真机插桩看到的是"构造时那次读和
+            # 半秒后那次读一模一样"（delta=0 ⇒ 比率算不出来），冷启动约 1/10 会撞上。
+            # 这是"点开第一眼"那一次，给用户看「未取到」比多等几十毫秒更糟 ⇒ **等到它动为止**，
+            # 但有硬上限（只在计数器卡住时才会走到这里，真实路径实测 0/10 不会触发）。
+            time.sleep(_CPU_RETRY_STEP_S)
+            waited += _CPU_RETRY_STEP_S
+            again = snapshot(self._prev_ticks)
+            if again.cpu_percent is not None:
+                dev = again
         self._prev_ticks = cpu_ticks()
-        self._prev_at = now
+        self._prev_at = time.monotonic()
         self._cache = dev
+        self._cache_at = self._prev_at
         return dev
