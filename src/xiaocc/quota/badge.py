@@ -73,3 +73,44 @@ def badge_candidates(report: dict[str, Any] | None, meta: dict[str, Any] | None)
 def badge_text(report: dict[str, Any] | None, meta: dict[str, Any] | None) -> str:
     """额度条该写什么。取不到就是取不到，**绝不补 0**。"""
     return badge_candidates(report, meta)[0]
+
+
+def badge_bubble_candidates(
+    report: dict[str, Any] | None, meta: dict[str, Any] | None
+) -> list[list[str]]:
+    """**对话气泡**用的候选：每条候选是"最多两行的分组"，信息量从多到少排好。
+
+    为什么不能沿用单行那套：气泡里那句要分两行画，窗口只有 160px 宽，**按"单行放不放得下"
+    挑出来的句子到了两行版式里会变成"半句话"**（第一行撑满、第二行只剩两个字）。所以这里
+    直接把"拆好行的候选"给调用方，由它按气泡每行可用宽度去挑；挑不到就退到更短的一条，
+    最后一定是"放得下且读得完"的那条。
+
+    口径与 :func:`badge_candidates` 完全同源（同一份报告、同一套陈旧/取不到的判据），
+    两处措辞必须一致——面板说陈旧、气泡还在报数，就是自相矛盾。
+    """
+    meta = meta or {}
+    if not meta.get("exists") or not report:
+        return [["额度未采集", "点开面板看详情"]]
+    age = meta.get("age_s")
+    if meta.get("stale") or (isinstance(age, (int, float)) and age > STALE_AGE_S):
+        return [["余额数据陈旧", f"{_ago(age)}未更新"], ["余额数据陈旧", _ago(age)]]
+    services = report.get("services") or []
+    for service in services:
+        if service.get("state") != "ok":
+            continue
+        items = service.get("items") or []
+        if not items:
+            continue
+        first = items[0]
+        unit = str(first.get("unit") or "")
+        symbol = _SYMBOLS.get(unit.upper(), unit)
+        amount = f"{symbol}{_amount(first.get('value'))}"
+        name = str(service.get("name") or "余额")
+        ago = _ago(age)
+        return [
+            [name, f"{amount} · {ago}"],
+            [name, amount],
+            [amount, ago],
+            [amount],
+        ]
+    return [["没有可自动获取的", "余额 · 去控制台看"], ["没有可自动获取的余额"]]

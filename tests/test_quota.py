@@ -21,6 +21,7 @@ import pytest
 
 from xiaocc.quota import DEFAULT_QUOTA_PATH, base, collect, ledger, refresh
 from xiaocc.quota import store as quota_store
+from xiaocc.quota.badge import badge_bubble_candidates, badge_text
 from xiaocc.quota.base import QuotaContext, read_env_file
 from xiaocc.quota.deepseek import DeepSeekAdapter, fetch_balance
 from xiaocc.quota.qianwen import QwenTokenPlanAdapter
@@ -419,6 +420,75 @@ def test_qwen_missing_binary_and_other_failures(tmp_path: Path):
     assert broken.fetch(QuotaContext(env={}, state_dbs=[])).state == "error"
 
 
+def test_qwen_credits_from_seat_tiers_addon_and_period(tmp_path: Path):
+    """@researcher 从二进制里反解的四处兜底：顶层 / seatTiers / addonRemaining / period。"""
+    payload = {
+        "data": {
+            "planName": "Token Plan",
+            "status": "valid",
+            "seatTiers": [
+                {"seats": 2, "totalCredits": 1000, "remainingCredits": 400},
+                {"seats": 1, "totalCredits": 500, "remainingCredits": 100},
+            ],
+            "addonRemaining": 250,
+            "period": {"remainingDays": 9},
+        }
+    }
+    adapter = QwenTokenPlanAdapter(
+        runner=qwen_runner(sub_out=json.dumps(payload)), cred_dir=tmp_path / "x"
+    )
+    quota = adapter.fetch(QuotaContext(env={}, state_dbs=[]))
+    labels = {i.label: (i.value, i.unit) for i in quota.items}
+    assert labels["Token Plan 剩余"] == ("500", "")  # 两个坐席相加
+    assert labels["Token Plan 总量"] == ("1,500", "")
+    assert labels["共享用量包剩余"] == ("250", "")
+    assert labels["套餐剩余"] == ("9", "天")
+
+
+def test_qwen_total_zero_is_not_a_zero_balance(tmp_path: Path):
+    """CLI 的边界语义：``totalCredits<=0`` 是「不限量/按量」，不许画成 0 余额。"""
+    adapter = QwenTokenPlanAdapter(
+        runner=qwen_runner(sub_out=json.dumps({"planName": "Token Plan", "totalCredits": 0, "remainingCredits": 0})),
+        cred_dir=tmp_path / "x",
+    )
+    quota = adapter.fetch(QuotaContext(env={}, state_dbs=[]))
+    labels = {i.label: i.value for i in quota.items}
+    assert labels["Token Plan 额度"].startswith("按量/不限量")
+    assert "Token Plan 剩余" not in labels
+
+
+def test_qwen_exhaust_status_is_reported(tmp_path: Path):
+    adapter = QwenTokenPlanAdapter(
+        runner=qwen_runner(
+            sub_out=json.dumps({"planName": "Token Plan", "status": "exhaust", "totalCredits": 100, "remainingCredits": 0})
+        ),
+        cred_dir=tmp_path / "x",
+    )
+    quota = adapter.fetch(QuotaContext(env={}, state_dbs=[]))
+    assert any(i.value == "已用尽" for i in quota.items)
+
+
+def test_qwen_subscription_help_text_is_not_data(tmp_path: Path):
+    """``subscription`` 是命令组：光敲它打印帮助且 exit 0 —— 不能被当成数据。"""
+    adapter = QwenTokenPlanAdapter(
+        runner=qwen_runner(sub_out="Usage: qianwen subscription <status|orders>"), cred_dir=tmp_path / "x"
+    )
+    quota = adapter.fetch(QuotaContext(env={}, state_dbs=[]))
+    assert quota.state == "ok"  # free-tier 那几条还在
+    assert any(i.label.startswith("qwen3.8-max") for i in quota.items)
+    assert "subscription" in (quota.detail or "")
+    assert all("Credits" not in i.label for i in quota.items)
+
+
+def test_qwen_subscription_uses_the_leaf_command(tmp_path: Path):
+    runner = qwen_runner(sub_out=json.dumps({"remainingCredits": 5, "totalCredits": 10}))
+    QwenTokenPlanAdapter(runner=runner, cred_dir=tmp_path / "x").fetch(
+        QuotaContext(env={}, state_dbs=[])
+    )
+    sub_calls = [c for c in runner.calls if "subscription" in c]
+    assert sub_calls and sub_calls[0][1:] == ["subscription", "status", "--plan", "token", "--format", "json"]
+
+
 def test_qwen_subscription_failure_keeps_free_tier_items(tmp_path: Path):
     adapter = QwenTokenPlanAdapter(
         runner=qwen_runner(sub_out="boom", sub_rc=1), cred_dir=tmp_path / "x"
@@ -455,6 +525,54 @@ def test_snapshot_reports_db_count_from_disk(tmp_path: Path):
     assert books["db_count"] == 4
     assert books["db_profiles"] == ["default", "a", "b", "c"]
     assert books["all_profiles"]["calls"] == 3
+
+
+# —— 8. 对话气泡的候选（两行分组）————————————————————————————————
+
+
+OK_REPORT = {
+    "services": [
+        {"id": "deepseek", "name": "DeepSeek", "state": "ok",
+         "items": [{"label": "可用余额", "value": "75.00", "unit": "CNY"}]},
+    ]
+}
+
+
+def test_bubble_candidates_are_two_line_groups_best_first():
+    cands = badge_bubble_candidates(OK_REPORT, {"exists": True, "age_s": 480, "stale": False})
+    assert cands[0] == ["DeepSeek", "¥75.00 · 8 分钟前"]
+    assert all(1 <= len(c) <= 2 for c in cands)  # 气泡最多两行
+    assert all(all(line.strip() for line in c) for c in cands)  # 没有半句空行
+    assert len(cands[-1]) == 1  # 最后一定退到能放下的最短一条
+
+
+def test_bubble_candidates_never_print_old_numbers_when_stale():
+    cands = badge_bubble_candidates(OK_REPORT, {"exists": True, "age_s": 3600, "stale": True})
+    flat = " ".join(" ".join(c) for c in cands)
+    assert "陈旧" in flat and "75.00" not in flat  # 与面板同规矩：陈旧不印旧数字
+
+
+def test_bubble_candidates_match_the_single_line_wording():
+    """两处口径必须同源：气泡和单行条不许一个说陈旧、一个还在报数。"""
+    stale = (OK_REPORT, {"exists": True, "age_s": 3600, "stale": True})
+    assert "陈旧" in badge_text(*stale)
+    assert "陈旧" in " ".join("".join(c) for c in badge_bubble_candidates(*stale))
+
+    none_report = {"services": [{"id": "dashscope", "name": "百炼", "state": "unknown", "items": []}]}
+    meta = {"exists": True, "age_s": 30, "stale": False}
+    assert "去控制台看" in badge_text(none_report, meta)
+    assert "去控制台看" in "".join("".join(c) for c in badge_bubble_candidates(none_report, meta))
+
+    empty = (None, {"exists": False, "age_s": None, "stale": True})
+    assert "未采集" in badge_text(*empty)
+    assert "未采集" in "".join("".join(c) for c in badge_bubble_candidates(*empty))
+
+
+def test_bubble_candidates_keep_the_amount_and_age():
+    cands = badge_bubble_candidates(OK_REPORT, {"exists": True, "age_s": 480, "stale": False})
+    flat = ["".join(c) for c in cands]
+    assert any("¥75.00" in line for line in flat)
+    assert any("分钟前" in line for line in flat)
 
 
 def test_default_quota_path_is_under_xiaocc():

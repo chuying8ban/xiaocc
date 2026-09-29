@@ -38,6 +38,16 @@ CREDENTIAL_DIR = Path.home() / ".qianwen"
 CONSOLE_URL = "https://platform.qianwenai.com/"
 LOGIN_HINT = "跑一次 `qianwen auth login`（浏览器批准一次即可）"
 
+#: **叶子命令**：``subscription`` 是命令组，光敲它会打印帮助并 exit 0（不是数据）
+SUBSCRIPTION_ARGS = ("subscription", "status", "--plan", "token", "--format", "json")
+
+#: 认出计划对象用的键（顶层/嵌套都能命中）
+_PLAN_KEYS = (
+    "totalCredits", "total_credits", "remainingCredits", "remaining_credits",
+    "seatTiers", "seat_tiers", "addonRemaining", "addon_remaining",
+    "remainingDays", "remaining_days", "planName", "plan_name", "subscribed",
+)
+
 
 def _run_default(args: Sequence[str], timeout: float) -> subprocess.CompletedProcess:
     return subprocess.run(
@@ -89,25 +99,91 @@ def _free_tier_items(payload: Any) -> list[QuotaItem]:
     return items
 
 
-def _credits_items(payload: Any) -> list[QuotaItem]:
-    """``subscription`` 的 Credits（Token Plan）。
+def _find_plan(node: Any, depth: int = 2) -> dict[str, Any] | None:
+    """在返回体里找那个「计划对象」（顶层包一层 ``data``/``plan`` 也算）。"""
+    if not isinstance(node, dict) or depth < 0:
+        return None
+    if any(key in node for key in _PLAN_KEYS):
+        return node
+    for value in node.values():
+        if isinstance(value, dict):
+            found = _find_plan(value, depth - 1)
+            if found is not None:
+                return found
+        elif isinstance(value, list):
+            for item in value:
+                found = _find_plan(item, depth - 1)
+                if found is not None:
+                    return found
+    return None
 
-    只看 ``totalCredits`` / ``remainingCredits`` / ``remainingDays`` 这几个已核到名字的键；
-    真实嵌套结构要等一次登录后的真输出才能钉死，所以这里**认不出就返回空**，绝不编数。
+
+def _credits_items(payload: Any) -> list[QuotaItem]:
+    """``subscription status --plan token`` 的 Credits。
+
+    **坑（@researcher 先踩、我从 CLI 二进制独立核过）**：``subscription`` 是命令组不是叶子，
+    光敲 ``subscription --format json`` 会**打印帮助并 exit 0**——拿到的不是数据。叶子是
+    ``subscription status --plan token``。
+
+    归一化后的计划对象形如 ``{subscribed, planName, status, totalCredits, remainingCredits,
+    usedPct, resetDate, remainingDays, seatTiers[], addonRemaining, period{...}}``，但
+    ``totalCredits``/``remainingCredits`` 在**顶层和 ``seatTiers[]`` 里都有**、
+    ``remainingDays`` 在**顶层和 ``period`` 里都有**、共享用量包在 ``addonRemaining``——
+    所以四个位置都要兜；认不出就返回空，绝不编数。
     """
-    if not isinstance(payload, dict):
+    plan = _find_plan(payload)
+    if plan is None:
         return []
     items: list[QuotaItem] = []
-    remaining = payload.get("remainingCredits", payload.get("remaining_credits"))
-    total = payload.get("totalCredits", payload.get("total_credits"))
-    days = payload.get("remainingDays", payload.get("remaining_days"))
-    if remaining is not None:
-        items.append(QuotaItem("Credits 剩余", _num(remaining), ""))
-    if total is not None:
-        items.append(QuotaItem("Credits 总量", _num(total), ""))
+    label = str(plan.get("planName") or "Credits")
+    if plan.get("status") == "exhaust":
+        items.append(QuotaItem(f"{label} 状态", "已用尽"))
+    if plan.get("subscribed") is False and not plan.get("remainingCredits"):
+        items.append(QuotaItem(f"{label} 状态", "未订阅"))
+
+    total, remaining, used = _credits_from_seats(plan)
+    if total is None:
+        total = plan.get("totalCredits", plan.get("total_credits"))
+        remaining = plan.get("remainingCredits", plan.get("remaining_credits"))
+        used = plan.get("usedPct", plan.get("used_pct"))
+    if _is_positive(total):
+        if remaining is not None:
+            items.append(QuotaItem(f"{label} 剩余", _num(remaining), ""))
+        items.append(QuotaItem(f"{label} 总量", _num(total), ""))
+        if used is not None:
+            items.append(QuotaItem("已用", f"{_num(used)}%", ""))
+    elif total is not None or remaining is not None:
+        # CLI 自己的边界语义：total<=0 表示「不限量/按量」，**不是**余额为 0
+        items.append(QuotaItem(f"{label} 额度", "按量/不限量（CLI 未报总量）"))
+
+    addon = plan.get("addonRemaining")
+    if _is_positive(addon):
+        items.append(QuotaItem("共享用量包剩余", _num(addon), ""))
+    days = plan.get("remainingDays")
+    period = plan.get("period")
+    if days is None and isinstance(period, dict):
+        days = period.get("remainingDays")
     if days is not None:
         items.append(QuotaItem("套餐剩余", _num(days), "天"))
     return items
+
+
+def _credits_from_seats(plan: dict[str, Any]) -> tuple[Any, Any, Any]:
+    """``seatTiers[]`` 汇总（每个坐席一项：``totalCredits``/``remainingCredits``/``seats``）。"""
+    tiers = plan.get("seatTiers") or plan.get("seat_tiers")
+    if not isinstance(tiers, list) or not tiers:
+        return None, None, None
+    total = remaining = 0
+    for tier in tiers:
+        if not isinstance(tier, dict):
+            continue
+        total += tier.get("totalCredits") or 0
+        remaining += tier.get("remainingCredits") or 0
+    return total, remaining, None
+
+
+def _is_positive(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0
 
 
 class QwenTokenPlanAdapter:
@@ -180,12 +256,12 @@ class QwenTokenPlanAdapter:
         # Credits（订阅）是加分项：拿不到不影响上面那几条
         extra: list[str] = []
         try:
-            sub = self._runner([self._binary, "subscription", "--format", "json"], ctx.timeout_s)
+            sub = self._runner([self._binary, *SUBSCRIPTION_ARGS], ctx.timeout_s)
             items += _credits_items(_extract_json(sub.stdout or ""))
             if getattr(sub, "returncode", 0) != 0:
                 extra.append("subscription 查询失败")
         except Exception:  # noqa: BLE001 - 可选信息
-            extra.append("subscription 未取到")
+            extra.append("subscription 未取到（命令组要敲到叶子：subscription status --plan token）")
 
         if not items:
             return self._result(STATE_UNKNOWN, detail="CLI 没报出任何额度行（可能账号没开通）")
