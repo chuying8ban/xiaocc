@@ -36,7 +36,8 @@ from .base import (
 BINARY = "qianwen"
 CREDENTIAL_DIR = Path.home() / ".qianwen"
 CONSOLE_URL = "https://platform.qianwenai.com/"
-LOGIN_HINT = "跑一次 `qianwen auth login`（浏览器批准一次即可）"
+#: 这句会**原样上屏**（面板是静态 HTML，不跑 Markdown）⇒ 不许带反引号/星号，用「」。
+LOGIN_HINT = "跑一次「qianwen auth login」（浏览器批准一次即可）"
 
 #: **叶子命令**：``subscription`` 是命令组，光敲它会打印帮助并 exit 0（不是数据）
 SUBSCRIPTION_ARGS = ("subscription", "status", "--plan", "token", "--format", "json")
@@ -232,7 +233,7 @@ class QwenTokenPlanAdapter:
         except FileNotFoundError:
             return self._result(
                 STATE_UNKNOWN,
-                detail=f"未安装官方 CLI `{self._binary}`；装好后 {LOGIN_HINT}",
+                detail=f"未安装官方 CLI「{self._binary}」；装好后 {LOGIN_HINT}",
             )
         except Exception as exc:  # noqa: BLE001 - 采集器不许抛
             return self._result(STATE_ERROR, detail=error_detail(exc, 120))

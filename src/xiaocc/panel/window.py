@@ -221,8 +221,10 @@ def open_panel(
             if ok and cmd == "quit" and not control.dry_run():
                 # 给页面 0.6s 把「已发出」写出来，再收窗（用 lambda 收进 self：类体里的名字
                 # 在方法里**不是**闭包变量，直接引 `_quit_self` 会 NameError）
+                # 留 2 秒再收窗：那 2 秒里页面上正写着「回来：下次开机自动回来，或 ops/xiaoccctl start」
+                # —— 当场收窗会把这句话一起吞掉，用户就只剩「窗口和桌宠都没了」
                 AppKit.NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
-                    0.6, False, lambda _t: self._close()
+                    2.0, False, lambda _t: self._close()
                 )
 
         def _save_settings(self, body: dict) -> None:
@@ -381,7 +383,7 @@ def open_panel(
             # 先把窗口摆上屏再灌页面：页面渲染失败也别让窗口"根本没出现"
             window.orderFrontRegardless()
             # 首帧**不等设备采样**（CPU 要 1s 的 tick 窗口，在这儿等就是空窗口挂一秒、
-            # 而且每次打开面板都要再付一次）。那一格先写「采集中…」，基线够了再渲染一遍填真数。
+            # 而且每次打开面板都要再付一次）。那一格先写「采集中」，基线够了再渲染一遍填真数。
             web.loadHTMLString_baseURL_(self.render_now(device_wait=False), None)
             # 补帧的判据是「**这一帧的 CPU 是空的**」，不是「等一会儿就能有」：计数器恰好在窗口
             # 那一刻卡住时（@coder 那条残留边界）只有按前者才会补，否则那一屏永久停在「未取到」。

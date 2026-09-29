@@ -421,7 +421,7 @@ class Sampler:
         为什么要有这个开关（2026-09-29 @researcher 量出来）：CPU 窗口从 0.5s 抬到 1.0s 之后，
         构造后 1 秒内算不出 CPU；而那次补等发生在面板**窗口已上屏、页面还没灌**之间 ——
         用户看到的是空窗口挂 0.5~1.0s（而且每次打开面板都付，不是一次性）。所以首帧不等
-        （那一格写「采集中…」），等基线够了再重渲染一次把真数填进来。
+        （那一格写「采集中」），等基线够了再重渲染一次把真数填进来。
         """
         now = time.monotonic()
         if not fresh and self._cache is not None and now - self._cache_at < self._ttl:

@@ -623,7 +623,7 @@ def test_device_candidates_say_taken_failed_never_zero():
 def test_device_candidates_say_collecting_when_baseline_is_too_new():
     """`pending`（基线还没攒够那 1 秒）**不许写成「未取到」** —— 那是「等一秒就有」的假故障。
 
-    面板那格写的是「采集中…」；气泡/菜单要同一套词，否则同一个物理状态三种说法。
+    面板那格写的是「采集中」；气泡/菜单要同一套词，否则同一个物理状态三种说法。
     """
     fresh = FakeDevice(cpu_percent=None)
     collecting = device_bubble_candidates(fresh, pending=True)

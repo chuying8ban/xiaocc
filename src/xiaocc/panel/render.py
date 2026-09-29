@@ -80,7 +80,7 @@ def _device_block(dev: Any, *, wait_remaining: float = 0.0) -> dict[str, Any]:
     """设备状态（CPU / 内存 / 磁盘 / 电池 / 已开机）。**采不到就空着**，页面写「未取到」。
 
     ``wait_remaining > 0`` 且 CPU 还是空的 ⇒ 那不是「未取到」而是「**还没到时候**」（基线太新）：
-    写「采集中…」并带上 ``pending``，宿主等一两秒重渲染一次填真数。两种空必须分开 ——
+    写「采集中」并带上 ``pending``，宿主等一两秒重渲染一次填真数。两种空必须分开 ——
     把「等一秒就有」写成「未取到」才是用户以为坏了的那种假数。
     """
     if dev is None:
@@ -141,7 +141,7 @@ def build_payload(
     """组装页面数据。**取不到就是取不到** —— 这里不补 0、不编数。
 
     ``device_wait=False`` 给**首帧**：设备采样绝不在主线程等（等了就是空窗口挂一秒，见
-    :meth:`xiaocc.device.Sampler.get`），那一格先写「采集中…」，等基线够了再渲染一次。
+    :meth:`xiaocc.device.Sampler.get`），那一格先写「采集中」，等基线够了再渲染一次。
     """
     from .. import settings as settings_store
     from ..quota.base import now_iso as _now_iso

@@ -66,8 +66,9 @@ __XIAOCC_STYLE__</style>
       <button id="btn-restart">重启小cc</button>
       <button id="btn-quit">退出小cc</button>
     </div>
-    <p class="note">重启 = 关掉再拉起（约 1 秒，位置不变）；退出 = 整个停掉，下次开机或手动再起。
-    两个按钮都要**点两下**：第一下只是等确认，3 秒不点自动撤回。</p>
+    <p class="note">重启 = 关掉再拉起（约 1 秒，位置不变）；退出 = <b>整个停掉、不会再自己回来</b>，
+    下次开机自动回来，或跑一次 <code>ops/xiaoccctl start</code>。</p>
+    <p class="note">两个按钮都要<b>点两下</b>：第一下只是等确认，3 秒不点自动撤回。</p>
     <p class="note" id="ctl-note"></p>
   </section>
 
@@ -236,7 +237,14 @@ function ctlArmReset(){
 function ctlAsk(cmd){
   const label = cmd === 'quit' ? '退出小cc' : '重启小cc';
   const btn = document.getElementById(cmd === 'quit' ? 'btn-quit' : 'btn-restart');
-  if(ctlArmed === cmd){ ctlArmReset(); post('control', {cmd:cmd}); ctlNote('已发出：' + label); return; }
+  if(ctlArmed === cmd){
+    ctlArmReset(); post('control', {cmd:cmd});
+    // 破坏性动作必须把「回来的路」写出来（用户 2026-09-29「不要有功能不明的功能」）
+    ctlNote(cmd === 'quit'
+      ? '小cc 正在退出… 回来：下次开机自动回来，或运行 ops/xiaoccctl start'
+      : '小cc 正在重启…（位置不变）');
+    return;
+  }
   ctlArmReset();
   ctlArmed = cmd; btn.classList.add('on'); btn.textContent = '再点一次确认';
   ctlNote('再点一次就' + label + '（3 秒内）');

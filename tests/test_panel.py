@@ -11,13 +11,18 @@
 
 from __future__ import annotations
 
+import ast
 import json
+import re
 import time
+from pathlib import Path
 
 import pytest
 
 from xiaocc import panel
 from xiaocc.panel import paths, render
+
+SRC = Path(__file__).resolve().parent.parent / "src"
 
 
 @pytest.fixture
@@ -80,6 +85,73 @@ def test_陈锁会过期(sandbox, monkeypatch):
     os.utime(paths.SPAWN_LOCK, (stale, stale))
     assert paths.request_open() == "spawned", "陈锁没过期 —— 面板死了就再也没法被拉起来"
     assert len(calls) == 1
+
+
+def test_rendered_page_has_no_markdown_in_what_the_user_reads(tmp_path) -> None:
+    """渲染后的**正文**里不许有 Markdown（``**`` / 反引号）—— 静态 HTML 不跑 Markdown，会原样上屏。
+
+    实拍：`两个按钮都要**点两下**` 就这么送到了用户眼前（2026-09-29 @writer 抓的）。
+    必须**先剥掉 ``<style>``/``<script>`` 再找**（@researcher 的实测教训：不剥就是永久红 ——
+    CSS/JS 注释里本来就有 ``**`` 和反引号），否则这条判据守不住东西还天天亮红灯。
+    """
+    payload = render.build_payload(
+        quota_path=tmp_path / "nope.json", probe_path=tmp_path / "nope-probe.json"
+    )
+    page = render.render_html(payload)
+    body = re.sub(r"<(style|script)\b.*?</\1>", "", page, flags=re.DOTALL | re.IGNORECASE)
+    assert "**" not in body, "正文里有 Markdown 星号：用户看到的就是 `**` 本身"
+    assert "`" not in body, "正文里有反引号：命令要写成 <code>…</code>"
+
+
+#: 会**原样上屏**的关键字参数（面板是静态 HTML，不跑 Markdown；终端里 Markdown 也没好处）
+_UI_KWARGS = {"hint", "detail", "note", "summary", "title"}
+#: 同类意思的模块级常量（`LOGIN_HINT` 这种会拼进上面那些话里）
+_UI_CONST_HINT = ("HINT", "DETAIL", "NOTE", "SUMMARY", "LABEL")
+
+
+def _literal_texts(node):
+    """取出表达式里的**字面量片段**（f-string 只取固定部分；变量值不在此列）。"""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        yield node.value
+    elif isinstance(node, ast.JoinedStr):
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                yield value.value
+    elif isinstance(node, ast.BinOp):  # 字符串拼接
+        yield from _literal_texts(node.left)
+        yield from _literal_texts(node.right)
+
+
+def _markdown_hits(text: str) -> str:
+    bad = [m for m in ("**", "`") if m in text]
+    return "/".join(bad)
+
+
+def test_user_visible_strings_in_code_carry_no_markdown() -> None:
+    """代码里那些**会原样上屏**的字符串不许带 Markdown —— 用户看到的就是星号/反引号本身。
+
+    实拍两处：面板注里的 `**点两下**`，和千问那条「未安装官方 CLI `qianwen`」（静态 HTML 不跑
+    Markdown ⇒ 反引号原样送到眼前）。用 ``ast`` 只认「这些关键字参数里的字面量 + 同类模块常量」，
+    所以 docstring 里的 ``反引号`` 不会误伤（@researcher 的实测教训：不剥注释/文档的扫描会永久红）。
+    """
+    offenders: list[str] = []
+    for path in sorted((SRC / "xiaocc").rglob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Call):
+                for kw in node.keywords:
+                    if kw.arg in _UI_KWARGS:
+                        for text in _literal_texts(kw.value):
+                            if (bad := _markdown_hits(text)):
+                                offenders.append(f"{path.name}:{node.lineno} {kw.arg}=… 带 {bad}")
+            elif isinstance(node, ast.Assign):
+                names = [t.id for t in node.targets if isinstance(t, ast.Name)]
+                if not any(any(k in n.upper() for k in _UI_CONST_HINT) for n in names):
+                    continue
+                for text in _literal_texts(node.value):
+                    if (bad := _markdown_hits(text)):
+                        offenders.append(f"{path.name}:{node.lineno} {names[0]}=… 带 {bad}")
+    assert not offenders, "会原样上屏的字符串里有 Markdown：\n" + "\n".join(offenders)
 
 
 def test_device_block_says_collecting_when_the_baseline_is_too_young() -> None:
