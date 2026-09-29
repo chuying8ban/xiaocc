@@ -48,14 +48,14 @@ def test_stale_hides_the_number() -> None:
 
 def test_not_collected_yet() -> None:
     assert badge_text(None, {"exists": False, "age_s": None, "stale": True}) == "额度未采集 · 点开面板看详情"
-    assert badge_text(report(), {"exists": True, "age_s": 1.0}) == "没有可自动获取的余额 · 去控制台看"
+    assert badge_text(report(), {"exists": True, "age_s": 1.0}) == "没有可自动获取的余额 · 去官网看余额"
 
 
 def test_unknown_services_do_not_fabricate_zero() -> None:
     rep = report(service("千问云", "unknown"), service("百炼", "error", {"value": None}))
     text = badge_text(rep, ok_meta(60.0))
     assert "0.00" not in text and "¥0" not in text
-    assert text == "没有可自动获取的余额 · 去控制台看"
+    assert text == "没有可自动获取的余额 · 去官网看余额"
 
 
 def test_first_ok_service_wins_and_units_are_mapped() -> None:

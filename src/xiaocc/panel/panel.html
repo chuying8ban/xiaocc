@@ -130,7 +130,8 @@ function render(){
         + (rest.length ? '<em>'+rest.map(i => esc((i.label||'').replace(/^其中/, ''))+' '+esc(money(i.value))).join(' · ')+'</em>' : '')
       : '<span class="no">'+STATE_WORD+'</span>';
     const sub = isOk ? (s.source || '') : (s.detail || (s.state==='error' ? '' : '这家没有可自动取数的接口'));
-    const link = s.console ? '<a class="go" href="#" data-url="'+esc(s.console)+'">控制台 ↗</a>' : '';
+    // 名字写"去官网看余额"：原来只写「控制台」，用户直接反馈"功能不明"（2026-09-29）
+    const link = s.console ? '<a class="go" href="#" data-url="'+esc(s.console)+'">去官网看余额 ↗</a>' : '';
     return '<div class="row"><span class="st '+st+'"></span>'
          + '<span class="name" title="'+esc(sub)+'">'+esc(s.name)+'<small>'+esc(sub)+'</small></span>'
          + '<span class="val'+(isOk?'':' unk')+'">'+value+'</span>'+link+'</div>';

@@ -560,8 +560,8 @@ def test_bubble_candidates_match_the_single_line_wording():
 
     none_report = {"services": [{"id": "dashscope", "name": "百炼", "state": "unknown", "items": []}]}
     meta = {"exists": True, "age_s": 30, "stale": False}
-    assert "去控制台看" in badge_text(none_report, meta)
-    assert "去控制台看" in "".join("".join(c) for c in badge_bubble_candidates(none_report, meta))
+    assert "去官网看余额" in badge_text(none_report, meta)
+    assert "去官网看余额" in "".join("".join(c) for c in badge_bubble_candidates(none_report, meta))
 
     empty = (None, {"exists": False, "age_s": None, "stale": True})
     assert "未采集" in badge_text(*empty)

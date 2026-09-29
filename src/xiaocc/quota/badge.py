@@ -75,7 +75,7 @@ def badge_candidates(report: dict[str, Any] | None, meta: dict[str, Any] | None)
         name = str(service.get("name") or "余额")
         full = f"{name} {amount} · {_ago(age)}"
         return [full, f"{amount} · {_ago(age)}", amount]
-    line = "没有可自动获取的余额 · 去控制台看"
+    line = "没有可自动获取的余额 · 去官网看余额"
     return [line]
 
 
@@ -130,7 +130,7 @@ def badge_bubble_candidates(
     # 「到了两行版式里会变成半句话」，它自己第一个犯（@writer 拿真 quota.json 跑出来的）。
     # 第一行给结论、第二行给动作；最后那条是保底（160px 下短句还能整句读出来）。
     return [
-        ["没有可自动获取的余额", "去控制台看"],
+        ["没有可自动获取的余额", "去官网看余额"],
         ["没有可自动获取的余额"],
-        ["去控制台看"],
+        ["去官网看余额"],
     ]

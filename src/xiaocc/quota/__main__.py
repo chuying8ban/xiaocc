@@ -20,7 +20,7 @@ _MARK = {STATE_OK: "  ", "stale": "陈旧", "unknown": "未知", "error": "出�
 def _fmt_items(service: dict[str, Any]) -> str:
     items = service.get("items") or []
     if not items:
-        return "未知（去控制台看）" if service.get("state") == "unknown" else "—"
+        return "未知（去官网看余额）" if service.get("state") == "unknown" else "—"
     return " ｜ ".join(f"{i['label']} {i['value']}{(' ' + i['unit']) if i['unit'] else ''}" for i in items)
 
 
