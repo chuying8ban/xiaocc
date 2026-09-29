@@ -507,6 +507,32 @@ def test_qwen_subscription_failure_keeps_free_tier_items(tmp_path: Path):
 # —— 7. 账本名单不许写死 ————————————————————————————————————————————
 
 
+def test_hermes_dir_seam_only_moves_when_explicitly_set(tmp_path: Path, monkeypatch):
+    """`XIAOCC_HERMES_DIR` 是**回归/截图**用的替身缝：设了才换，没设必须还是真家目录。
+
+    为什么这条要有：对外截图的「本机账本」一节读的就是真账本 —— 没有这条缝，重拍一次就会把作者
+    真实的调用次数/金额/真库路径拍进公开仓库（跟「运行时证据不入库」同一条规矩）；缝设错的代价
+    不对称，所以默认值必须是真那份、且只认这一个显式变量名。
+    """
+    monkeypatch.delenv(base.HERMES_DIR_ENV, raising=False)
+    assert base.hermes_dir() == base.DEFAULT_HERMES_DIR
+    assert base.default_state_dbs()[0] == base.DEFAULT_HERMES_DIR / "state.db"
+
+    fake = tmp_path / "fake-hermes"
+    (fake / "profiles" / "coder").mkdir(parents=True)
+    (fake / "state.db").write_bytes(b"")
+    (fake / "profiles" / "coder" / "state.db").write_bytes(b"")
+    monkeypatch.setenv(base.HERMES_DIR_ENV, str(fake))
+    assert base.hermes_dir() == fake
+    assert base.hermes_env_file() == fake / ".env"
+    assert base.default_state_dbs() == [fake / "state.db", fake / "profiles" / "coder" / "state.db"]
+    # 空串按"没设"处理，别把 cwd 当成家目录
+    monkeypatch.setenv(base.HERMES_DIR_ENV, "   ")
+    assert base.hermes_dir() == base.DEFAULT_HERMES_DIR
+    # 老签名收字符串（`default_state_dbs("/Users/…/.hermes")`），换实现时别把它弄丢
+    assert base.default_state_dbs(str(fake)) == [fake / "state.db", fake / "profiles" / "coder" / "state.db"]
+
+
 def test_default_state_dbs_globs_profiles_on_disk(tmp_path: Path):
     (tmp_path / "state.db").write_bytes(b"")
     for name in ("coder", "newbie"):

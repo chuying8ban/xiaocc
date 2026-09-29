@@ -19,12 +19,12 @@ from typing import Any
 
 from . import ledger, store
 from .base import (
-    DEFAULT_HERMES_ENV,
     STATE_ERROR,
     QuotaContext,
     ServiceQuota,
     default_state_dbs,
     error_detail,
+    hermes_env_file,
     now_iso,
     read_env_file,
 )
@@ -67,13 +67,13 @@ def default_adapters() -> list:
 def build_context(
     *,
     env: dict[str, str] | None = None,
-    env_file: Path = DEFAULT_HERMES_ENV,
+    env_file: Path | None = None,
     state_dbs: Sequence[Path] | None = None,
     window_days: int = 30,
 ) -> QuotaContext:
     """默认从**默认 profile 的绝对路径**读密钥，不看 $HERMES_PROFILE / cwd。"""
     return QuotaContext(
-        env=dict(env) if env is not None else read_env_file(env_file),
+        env=dict(env) if env is not None else read_env_file(env_file or hermes_env_file()),
         state_dbs=list(state_dbs) if state_dbs is not None else default_state_dbs(),
         window_days=window_days,
     )

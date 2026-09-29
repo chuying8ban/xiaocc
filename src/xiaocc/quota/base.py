@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -28,6 +29,24 @@ STATE_ERROR = "error"
 DEFAULT_HERMES_DIR = Path.home() / ".hermes"
 DEFAULT_HERMES_ENV = DEFAULT_HERMES_DIR / ".env"
 
+#: 沙箱缝：只给回归/截图用，指向**替身**家目录。默认值永远是真的那份。
+#:
+#: 为什么必须有：面板「本机账本」一节的数字来自真账本，而对外截图**绝不能把作者真实调用次数、
+#: 金额、真库路径拍进公开仓库**（跟运行时证据不入库是同一条规矩）；缝设错则是把真数的替身
+#: 拍了个假数、或者反过来把真数拍出去 ⇒ 代价不对称，所以只认这一个显式变量名。
+HERMES_DIR_ENV = "XIAOCC_HERMES_DIR"
+
+
+def hermes_dir() -> Path:
+    """默认 profile 的家目录；只有 ``XIAOCC_HERMES_DIR`` 显式设了才换（回归/截图用替身）。"""
+    raw = os.environ.get(HERMES_DIR_ENV, "").strip()
+    return Path(raw) if raw else DEFAULT_HERMES_DIR
+
+
+def hermes_env_file() -> Path:
+    """密钥文件：默认那份 `.env`；沙箱里跟着替身家目录走。"""
+    return hermes_dir() / ".env"
+
 #: 账本：默认库 + **每个** profile 自己的 state.db（@writer/@researcher 实测只读默认库会漏约 41%）
 #:
 #: **不要在代码里写死 profile 名单**（这里原来是写死的 5 个名字，面板那边还写死"全部 6 库"）：
@@ -43,18 +62,19 @@ def now_iso() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
-def profile_dbs(hermes_dir: Path = DEFAULT_HERMES_DIR) -> list[Path]:
+def profile_dbs(root_dir: Path | None = None) -> list[Path]:
     """磁盘上真实存在的 profile 账本（按名字排序）——**不依赖任何写死的名单**。"""
-    root = Path(hermes_dir) / PROFILES_DIRNAME
+    root = Path(root_dir or hermes_dir()) / PROFILES_DIRNAME
     try:
         return sorted(p / "state.db" for p in root.iterdir() if (p / "state.db").exists())
     except OSError:
         return []
 
 
-def default_state_dbs(hermes_dir: Path = DEFAULT_HERMES_DIR) -> list[Path]:
+def default_state_dbs(root_dir: Path | None = None) -> list[Path]:
     """默认库 + 扫出来的各 profile 库；**数量由磁盘决定**，面板别再写死"6 库"。"""
-    return [Path(hermes_dir) / "state.db", *profile_dbs(hermes_dir)]
+    root = root_dir or hermes_dir()
+    return [Path(root) / "state.db", *profile_dbs(root)]
 
 
 def db_label(path: Path) -> str:
