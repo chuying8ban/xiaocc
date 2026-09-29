@@ -116,6 +116,22 @@ _DRIFT_TOLERANCE = 1.0
 #: 漂移自检的节拍（秒）：**累计**够这么久才查一次，不是每帧查 —— 查一次要戳 ObjC 拿真实 frame。
 _DRIFT_CHECK_PERIOD = 1.0
 
+#: 拖拽态事件循环的睡眠上限（秒）。拖拽时帧预算（``1/fps``）必须让位：
+#: **鼠标事件的排空节奏就是跟手的节奏** —— 一圈睡 66ms 就等于把窗口位置更新压到 15 次/秒
+#: （部署形态 fps=15 实测 16.5~18.7 次/秒，手上就是台阶感）。压到 4ms 让位置按设备速率落下去。
+#: 内容重绘不走这条路（见 :meth:`AppKitBackend._paint` 的帧预算闸 + ``_set_window_rect`` 里
+#: 拖动不做强制同步重绘），所以圈速提上来**不会**把软件光栅化的次数一起抬上去。
+_DRAG_MAX_SLEEP = 0.004
+
+#: 拖拽兜底：鼠标键**已经全松开**但 ``mouseUp`` 没到（事件丢了、窗口被 orderOut、被别的
+#: 事件循环吃掉）⇒ 自己收尾。拖拽态圈速被抬到 ~250 圈/s（见 ``_DRAG_MAX_SLEEP``），
+#: 漏一次 mouseUp 不再是「白烧一点 CPU」：``_poll`` 在 ``_dragging`` 时直接返回，
+#: 悬停/贴边/锚点写入会**一直冻到重启**，同时以 ~15% 烧一个核（2026-09-29 那个跑了
+#: 3.5 小时、9.6% 的遗留实例就是同一类病）。按住不放时按钮非 0，所以
+#: 「手停住不动的拖动」不会被误判成松手。宽度取 80ms：真实拖动的相邻事件间隔是
+#: 几毫秒量级，而窗口服务器切换按钮状态是同帧的。
+_DRAG_BUTTON_UP_GRACE = 0.08
+
 _IMAGE_SUFFIXES = (".png", ".svg", ".pdf", ".tiff", ".jpg", ".jpeg")
 
 
@@ -311,6 +327,8 @@ class AppKitBackend(Backend):
         #: 自证据写盘失败只吵一次（诊断文件写不进去不该每秒刷屏，更不该影响桌宠）
         self._probe_warned = False
         self._dragging = False
+        #: 这次拖拽是不是真鼠标起的（``start_drag`` 的 ``from_mouse``）—— 兜底只看这条
+        self._drag_from_mouse = False
         self._drag_offset = (0.0, 0.0)
         self._started = time.monotonic()
         self._art_cache: dict[str, Any] = {}
@@ -323,6 +341,10 @@ class AppKitBackend(Backend):
         self._last_caption_drawn: str = ""
         #: 上一次**真正画下去**那一帧的指纹；一致就跳过重绘（见 :meth:`_fingerprint`）
         self._last_fingerprint: tuple[Any, ...] | None = None
+        #: 上一次真正重绘的时刻 —— 拖拽态的帧预算闸用它（见 :meth:`_paint`）
+        self._last_paint_at = 0.0
+        #: 拖拽兜底：鼠标键第一次读到「全松开」的时刻（见 ``_DRAG_BUTTON_UP_GRACE``）
+        self._buttons_up_since: float | None = None
         #: 光标当前是否落在热区 —— 由 :meth:`_poll` 维护，指纹要用
         self._cursor_hot = False
         #: 事件循环的自证据：本秒累计圈数 / 上一秒结算出的圈速 / 上一圈真正睡了多久
@@ -416,8 +438,14 @@ class AppKitBackend(Backend):
         rect = wl.Rect(x, y, *size).clamped_into(self._space().screen)
         self._set_window_rect(rect, reason="drag")
 
-    def start_drag(self) -> None:
+    def start_drag(self, *, from_mouse: bool = False) -> None:
         """程序化拖拽的开始（等价于鼠标按下）—— 自动化脚本/回归用。
+
+        **「等价于鼠标按下」不等于「按钮真的按下了」。** 这条路径上从来没有真按钮，所以拖拽兜底
+        （:meth:`_drag_watchdog`，靠 ``pressedMouseButtons`` 判定）必须放过它：只有真实
+        ``mouseDown`` 走过的那条路才传 ``from_mouse=True``。不区分的话，程序化 API 会在 80ms
+        后被兜底 ``end_drag()`` 收掉 —— ``verify_drag_tracking.py --real`` 就是这么红的
+        （「确实拖到了屏幕中央附近」失败：窗口拖到一半被松开）。
 
         和真鼠标走同一套状态迁移：从把手条上抓起就先弹成完整角色，
         然后交给 :meth:`end_drag` 判定贴边。
@@ -426,6 +454,8 @@ class AppKitBackend(Backend):
             self._expand_from_edge()
         self._dock.drag_started()
         self._dragging = True
+        #: 这次拖拽是不是**真鼠标**起的 —— 兜底只对真鼠标那条路生效
+        self._drag_from_mouse = from_mouse
 
     def end_drag(self) -> wl.Edge:
         """松手：判定是否贴边收起。返回落在哪条边上。
@@ -607,6 +637,10 @@ class AppKitBackend(Backend):
             #: 四选一：``anchor``（在锚点）/ ``drag``（正被拖）/ ``collapsed``（贴边态 ——
             #: 收起的把手条、或从把手条展开的完整角色，细分看上面的 ``dock``）/ ``drifted``（漂了）。
             "anchor_state": anchor_state,
+            #: 正在被拖动（真鼠标按住不放）—— 运行时保护要**排除**这种采样：
+            #: 拖拽态事件循环被抬到设备速率，CPU 会短暂升到 10~20%（跟手换来的，
+            #: 见 ``_DRAG_MAX_SLEEP``），拿它去撞看门狗阈值等于「用户多玩两下就停面板」。
+            "dragging": self._dragging,
             "art": self._last_art,
             #: 实际画上去的文案（不是引擎的那份原文）—— 待机时应当为空
             "caption_drawn": self._last_caption_drawn,
@@ -779,7 +813,17 @@ class AppKitBackend(Backend):
                 "位置变化 [%s] (%d,%d) → (%d,%d)",
                 reason, self._window_local.x, self._window_local.y, rect.x, rect.y,
             )
-        self._window.setFrame_display_(self._space().to_ns_rect(rect), True)
+        ns_rect = self._space().to_ns_rect(rect)
+        if reason == "drag" and abs(rect.width - self._window_local.width) < 0.5 and abs(
+            rect.height - self._window_local.height
+        ) < 0.5:
+            # 拖动只是**搬家**（尺寸不变）：走 setFrameOrigin 这条便宜的路，不重绘、
+            # 也不触发尺寸重算。setFrame:display: 每次都是一整张软件光栅化 —— 拖拽态圈速
+            # 被抬到设备速率（见 _DRAG_MAX_SLEEP）后，它会变成每秒几百次。
+            # 内容的重绘由 :meth:`_paint` 的帧预算闸负责。
+            self._window.setFrameOrigin_(ns_rect.origin)
+        else:
+            self._window.setFrame_display_(ns_rect, True)
         self._window_local = rect
 
     # —— 每个动画节拍：命中判定 + 收起/展开 ————————————————————————————————
@@ -797,7 +841,6 @@ class AppKitBackend(Backend):
         硬性限在 fps 以内，CPU 占用只跟「画了多少」挂钩，不跟「CPU 有多快」挂钩。**别退回忙等。**
         """
         app = NSApplication.sharedApplication()
-        budget = 1.0 / self.fps
         deadline = time.monotonic() + max(0.0, seconds)
         while True:
             remaining = deadline - time.monotonic()
@@ -816,6 +859,7 @@ class AppKitBackend(Backend):
                 if event is None:
                     break
                 app.sendEvent_(event)
+            self._drag_watchdog()
             changed = self._poll()
             self._paint(force=changed)
             self._count_loop()
@@ -825,7 +869,11 @@ class AppKitBackend(Backend):
                 self._last_drift_check = now
                 self._check_drift()
                 self._write_probe()  # 同一拍落盘，别为诊断多加定时器
-            # 帧预算的余量睡掉（不超过本次 _pump 的截止时间）—— 这一句就是限速器
+            # 帧预算的余量睡掉（不超过本次 _pump 的截止时间）—— 这一句就是限速器。
+            # 拖拽态换用 _DRAG_MAX_SLEEP：**排空事件队列的节奏就是跟手的节奏**，
+            # 睡满 1/fps 就等于把窗口位置更新压到 fps 次/秒（部署形态实测 18.7 次/秒，
+            # 手上是台阶感）。每圈现算，因为拖动可能在这一圈中间开始或结束。
+            budget = _DRAG_MAX_SLEEP if self._dragging else (1.0 / self.fps)
             nap = min(budget - (time.monotonic() - frame_start), deadline - time.monotonic())
             slept = 0.0
             if nap > 0.0:
@@ -845,13 +893,30 @@ class AppKitBackend(Backend):
             self._pump_window_start = now
 
     def _paint(self, force: bool = False) -> None:
-        """重画一帧。``displayIfNeeded()`` 是同步整窗重绘，画面没变就别白画。"""
+        """重画一帧。``displayIfNeeded()`` 是同步整窗重绘，画面没变就别白画。
+
+        拖拽态另加一道**帧预算闸**：那时事件循环被抬到设备速率（见 ``_DRAG_MAX_SLEEP``），
+        而窗口搬家**不需要**重画内容（背板跟着窗口走，见 :meth:`_set_window_rect`）——
+        每圈都重画会把软件光栅化的次数从 15 次/秒抬到几百次/秒，正好把跟手省下的又烧回去。
+        所以：指纹一样就跳过；指纹变了（姿势/呼吸动画）也最多 ``1/fps`` 重画一次。
+        """
         if self._view is None or self._window is None:
             return
-        fingerprint = self._fingerprint()
-        # 拖拽中每帧都得画：窗口正跟手移动，指纹一样也不能停
-        if not force and not self._dragging and fingerprint == self._last_fingerprint:
-            return
+        now = time.monotonic()
+        fingerprint: tuple[Any, ...] | None = None
+        if not force:
+            if self._dragging:
+                # 拖拽态只看帧预算：位置每圈都在变 ⇒ 指纹必然变，算它纯浪费
+                # （圈速被抬到 200+/s 时这笔开销要付 200 次）
+                if (now - self._last_paint_at) < (1.0 / self.fps):
+                    return
+            else:
+                fingerprint = self._fingerprint()
+                if fingerprint == self._last_fingerprint:
+                    return
+        if fingerprint is None:
+            fingerprint = self._fingerprint()
+        self._last_paint_at = now
         self._last_fingerprint = fingerprint
         self._view.setNeedsDisplay_(True)
         self._window.displayIfNeeded()
@@ -957,20 +1022,65 @@ class AppKitBackend(Backend):
 
     # —— 鼠标：拖拽就位 / 松手贴边 ——————————————————————————————————————————
 
-    def _view_point(self, event: Any) -> wl.Point:
-        """事件坐标（视图左下原点）→ 窗口内左上原点坐标。"""
-        point = event.locationInWindow()
-        return wl.Point(point.x, self._window_local.height - point.y)
+    def _mouse_screen_point(self, event: Any) -> wl.Point:
+        """鼠标事件 → **屏幕**坐标（左上原点，和 :mod:`window_layout` 同一口径）。
+
+        拖动的位移基准**必须**是屏幕口径。这里用「事件局部坐标 + **当前**窗口原点」换算，
+        而不是裸 ``NSEvent.mouseLocation()``：两者代数上等价，但这一路**假事件也能驱动**，
+        回归脚本（``scripts/verify_drag_mouse.py``）因此能覆盖真机这条路径。
+
+        为什么不能拿局部坐标当基准（2026-09-29 用户报「拖动卡顿」的真因）：``locationInWindow``
+        是相对**当前** frame 算的，窗口一动它就反向平移，于是
+        ``target = 按下时窗口原点 + (本帧局部坐标 − 按下时局部坐标)``
+        解出来是 ``u_k = C − u_{k−1}`` —— DC 增益 ½、极点在 −1：
+        跟手只有半速且滞后随已拖距离线性累加，鼠标停住也永远静不下来（真机日志里
+        88% 的相邻位移方向相反，窗口在两三个位置间来回翻）。
+        """
+        point = event.locationInWindow()  # Cocoa 窗口坐标（原点在左下）
+        origin = self._window_local
+        return wl.Point(origin.x + point.x, origin.y + self._view_height() - point.y)
+
+    def _mouse_button_down(self) -> bool:
+        """左键是否仍按着 —— 只给拖拽兜底用。
+
+        单独一个方法是为了**可注入**：假事件回归（``scripts/verify_drag_mouse.py``）里没有真
+        鼠标，得能换成「一直按着」，否则 80ms 后兜底会把它的仿真拖动收掉。
+        """
+        return bool(NSEvent.pressedMouseButtons() & 1)
+
+    def _drag_watchdog(self) -> None:
+        """拖拽兜底：按钮全松开却还在 ``_dragging`` ⇒ 那次 ``mouseUp`` 丢了，自己收尾。
+
+        见 ``_DRAG_BUTTON_UP_GRACE``：不这么做，一次丢失的 mouseUp 会让事件循环以
+        ~250 圈/s 空转、且 ``_poll``（悬停/贴边/锚点写入）一直不跑，直到重启。
+        """
+        if not self._dragging or not self._drag_from_mouse or self._mouse_button_down():
+            self._buttons_up_since = None
+            return
+        now = time.monotonic()
+        if self._buttons_up_since is None:
+            self._buttons_up_since = now
+            return
+        if now - self._buttons_up_since < _DRAG_BUTTON_UP_GRACE:
+            return
+        waited = now - self._buttons_up_since
+        self._buttons_up_since = None
+        log.warning(
+            "拖拽中鼠标键已松开 %.0fms 但没收到 mouseUp —— 主动收尾（免得拖拽圈速一直空转）",
+            waited * 1000,
+        )
+        self.end_drag()
 
     def _mouse_down(self, event: Any) -> None:
-        self.start_drag()
-        point = self._view_point(event)
+        self.start_drag(from_mouse=True)  # 真按钮按着 ⇒ 拖拽兜底对它生效
+        point = self._mouse_screen_point(event)
+        # 按下时指针在窗口内的位置（屏幕口径的偏移量），拖动期间保持不变
         self._drag_offset = (point.x - self._window_local.x, point.y - self._window_local.y)
 
     def _mouse_dragged(self, event: Any) -> None:
         if not self._dragging:
             return
-        point = self._view_point(event)
+        point = self._mouse_screen_point(event)
         self.move_window_to(point.x - self._drag_offset[0], point.y - self._drag_offset[1])
 
     def _mouse_up(self, _event: Any) -> None:
