@@ -29,6 +29,17 @@ FRESH_H_STALE_NOTE = 72.0        # 环境受限型超过这个年龄要在报告
 ENV_LIMITED = {"verify_drag_inject"}   # 需要「未锁 + 空闲」窗口才能跑的门禁
 
 
+def repo_gates() -> list[str]:
+    """仓库里现有的门禁脚本名 = 发布时"该有哪些门禁"的清单。
+
+    默认只列"有记录的门禁"会把**从没跑过的**藏起来（看不见 ⇒ 容易被当成不存在），
+    所以默认清单取"脚本存在 ∪ 有记录"，让 `未跑` 显式上屏。
+    """
+    scripts = Path(__file__).resolve().parents[1] / "scripts"
+    # verify_log 是**记录器本身**（门禁往里写），不是门禁 —— 列进去会多出一条永远"未跑"的噪音。
+    return sorted(p.stem for p in scripts.glob("verify_*.py") if p.stem != "verify_log")
+
+
 def logdir() -> Path:
     env = os.environ.get("XIAOCC_VERIFY_LOGDIR")
     return Path(env) if env else Path.home() / "Library/Logs/xiaocc"
@@ -107,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
 
     d = logdir()
     recs = load_records(d)
-    gates = args.gates or sorted(recs) or []
+    gates = args.gates or sorted(set(recs) | set(repo_gates()) or set(recs))
     now = time.time()
     rows = [(g, *classify(g, recs.get(g), now)) for g in gates]
 
