@@ -35,7 +35,7 @@ SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
 LABEL="ai.hermes.xiaocc"
 OLD_LABEL="ai.hermes.mascot-pet"
-GUARD_LABEL="ai.hermes.mascot-pet.keepawake"   # 睡眠闸守卫：名字留着，依赖已改成指向 xiaocc
+GUARD_LABEL="${XIAOCC_GUARD_LABEL:-ai.hermes.mascot-pet.keepawake}"   # 睡眠闸守卫：名字留着，依赖已改成指向 xiaocc；可用环境变量接管以便沙箱验证
 DOMAIN="gui/$(id -u)"
 PLIST_SRC="$PROJECT_DIR/ops/ai.hermes.xiaocc.plist"
 PLIST_DST="$HOME/Library/LaunchAgents/ai.hermes.xiaocc.plist"
@@ -278,9 +278,12 @@ PYEOF
   return 0
 }
 
-# 睡眠闸守卫：KeepAlive.OtherJobEnabled 只管「启动」，所以 stop→start 之后守卫不会自己回来
-# （它看到 label 不在就退出，这是它设计的一部分）。每次 start 都补一次，别让机器在无人察觉时
-# 回到「空闲 1 分钟就睡」。
+# 睡眠闸守卫：**实测修正**（2026-09-29，两个可抛标签对照 + 真机断言）——
+# `KeepAlive.OtherJobEnabled` 只管「启动/保持」，**不管收尾**：bootout 了它盯的那个作业之后，
+# 守卫依旧在跑（+8s / +3s 两次采样 pid 不变），于是它继续持有 `PreventUserIdleSystemSleep`
+# （真机实测：用户 22:20 点了「退出小cc」，caffeinate 断言从 19:03 起连续持有了 4h22m，跨过那次退出）。
+# 所以必须**两头都做**：stop 时显式 bootout 守卫（见 cmd_stop），start 时再补起来（本函数）。
+# 只做一半的后果分别是「机器空闲不睡、在电池上白耗」和「空闲 1 分钟就睡」——两个都不会报错。
 _ensure_guard() {
   local st
   st=$(launchctl print "$DOMAIN/$GUARD_LABEL" 2>/dev/null | awk '/^[[:space:]]*state = /{print $3; exit}')
@@ -360,6 +363,22 @@ cmd_stop() {
     print -u2 "xiaoccctl: 已 bootout 但 job 仍在（pid=$(_pid)），请查 $CTL_LOG"
     _log "stop: 残留 pid=$(_pid)"
     _write_state "stop 后 job 仍在"; return 4
+  fi
+  # 守卫必须一起走：OtherJobEnabled 只管启动（见上面 _ensure_guard 的实测注释），
+  # 不收尾的话它会继续持有 PreventUserIdleSystemSleep —— 用户以为「退出了」，机器却还在被按着不睡。
+  # 幂等（没加载时什么都不做），且**不改 stop 的退出码语义**。
+  if launchctl print "$DOMAIN/$GUARD_LABEL" >/dev/null 2>&1; then
+    launchctl bootout "$DOMAIN/$GUARD_LABEL" >/dev/null 2>&1
+    for i in {1..8}; do
+      launchctl print "$DOMAIN/$GUARD_LABEL" >/dev/null 2>&1 || break
+      sleep 0.25
+    done
+    if launchctl print "$DOMAIN/$GUARD_LABEL" >/dev/null 2>&1; then
+      print -u2 "xiaoccctl: ⚠ 睡眠闸守卫仍在（$GUARD_LABEL）—— 它可能还按着「禁止空闲睡眠」"
+      _log "stop: 守卫未随停（$GUARD_LABEL）"
+    else
+      _log "stop: 睡眠闸守卫已随停（$GUARD_LABEL）"
+    fi
   fi
   print "已停止（原 pid=${pid:-?}）"
   _log "stop: 已停止 原 pid=${pid:-?}"
