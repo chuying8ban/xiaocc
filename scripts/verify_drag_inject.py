@@ -16,7 +16,11 @@ mouseDown，否则这一击落到桌面上（本机 `CGPreflightPostEventAccess(
   ③ 拖动中角色不许画空：窗口图不透明占比 ≥ 10%（照 scripts/pixel_stats.py 的判空口径）
   ④ 顺手报拖动中 CPU（进程时间的差值），别用「提高节拍」把风扇换回来
 
-用法：``.venv/bin/python scripts/verify_drag_inject.py [--fps 15] [--secs 1.5]``
+**前置：未锁屏 + 空闲 ≥ 5s**（`--force` 跳过）。锁屏时系统会吞掉注入的 HID 事件 ⇒ 跑出来是**假红**
+（看着像"拖动坏了"、实际是环境不满足）。今晚就栽过一次：同一支脚本 @ops 跑失败、@lead 跑成功，
+差别只在 session 状态。环境不满足时退出码 **2** 并明说「不是功能坏了」，别让谁拿一条假红去改代码。
+
+用法：``.venv/bin/python scripts/verify_drag_inject.py [--fps 15] [--secs 1.5] [--force]``
 """
 
 from __future__ import annotations
@@ -102,11 +106,39 @@ def opaque_ratio(img) -> float:
     return opaque / (w * h)
 
 
+IDLE_MIN_S = 5.0
+
+
+def environment_blocker() -> str | None:
+    """前置不满足的原因（None = 可以跑）。
+
+    锁屏时注入的 HID 事件会被系统吞掉，量出来的是**假红**；手刚在动则合成事件与真人事件抢同一个
+    指针，跟手几何也没意义。两者都能从进程外读到，所以不靠"等人走开"这种口头前提。
+    """
+    session = Quartz.CGSessionCopyCurrentDictionary() or {}
+    if session.get("CGSSessionScreenIsLocked"):
+        return "屏是锁着的（锁屏时注入的事件会被系统吞掉）"
+    idle = Quartz.CGEventSourceSecondsSinceLastEventType(
+        Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType
+    )
+    if idle < IDLE_MIN_S:
+        return f"鼠标/键盘刚动过（空闲 {idle:.1f}s < {IDLE_MIN_S:g}s）"
+    return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--fps", type=float, default=15.0, help="与被部署面板一致的帧率")
     ap.add_argument("--secs", type=float, default=1.5, help="拖动时长")
+    ap.add_argument("--force", action="store_true", help="跳过前置（明知环境不满足时用）")
     args = ap.parse_args()
+
+    blocker = None if args.force else environment_blocker()
+    if blocker:
+        # rc=2 与 FAIL(1) 分开：这是**环境不满足**，不是功能坏了（一条假红会误导人去改好代码）
+        print(f"跳过（rc=2，环境不满足，**不是功能坏了**）：{blocker}")
+        print("要跑就等屏解锁、手离开鼠标 5 秒再来；或在真的知道自己在做什么时加 --force。")
+        return 2
 
     tmp = Path(tempfile.mkdtemp(prefix="xiaocc-inject-"))
     state = tmp / "state.json"
