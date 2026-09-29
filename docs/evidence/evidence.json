@@ -11,7 +11,7 @@
     1512.0,
     982.0
   ],
-  "started": "2026-09-29 09:51:24",
+  "started": "2026-09-30 01:16:30",
   "checks": [
     {
       "check": "窗口不透明=false",
@@ -112,6 +112,51 @@
       "check": "done 用对了动作/配色",
       "ok": true,
       "detail": "state=done art=done.svg"
+    },
+    {
+      "check": "01-idle-floating 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=19.823%"
+    },
+    {
+      "check": "02-docked-collapsed 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=97.701%"
+    },
+    {
+      "check": "03-handle-hover-no-flicker 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=97.701%"
+    },
+    {
+      "check": "04-hover-expanded 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=19.165%"
+    },
+    {
+      "check": "05-leave-recalls 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=97.557%"
+    },
+    {
+      "check": "06-state-idle 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=19.170%"
+    },
+    {
+      "check": "07-state-working 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=21.964%"
+    },
+    {
+      "check": "08-state-error 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=21.025%"
+    },
+    {
+      "check": "09-state-done 不是空图（非透明像素 ≥ 2%）",
+      "ok": true,
+      "detail": "opaque_pct=20.405%"
     }
   ],
   "steps": [
@@ -119,8 +164,9 @@
       "step": "01-idle-floating",
       "note": "自由漂浮 + 待机动画",
       "window_png": "docs/evidence/01-idle-floating.png",
+      "opaque_pct": 19.823,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -141,18 +187,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "anchor",
+        "dragging": false,
         "art": "idle.svg",
         "caption_drawn": "",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 0.0,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646684.9594471,
-        "state_age_s": 0.672,
+        "state_at": 1790702190.451665,
+        "state_changed_ago_s": 0.682,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": null,
         "view_size": [
           160.0,
           194.0
         ],
         "pump_loops_per_sec": 0.0,
-        "pump_sleep_ms": 1.5,
+        "pump_sleep_ms": 5.4,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
@@ -162,8 +215,9 @@
       "step": "02-docked-collapsed",
       "note": "拖到右边缘松手 → 收成把手条",
       "window_png": "docs/evidence/02-docked-collapsed.png",
+      "opaque_pct": 97.701,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -184,18 +238,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "collapsed",
+        "dragging": false,
         "art": "idle.svg",
         "caption_drawn": "",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 28.1,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646684.9594471,
-        "state_age_s": 3.659,
+        "state_at": 1790702190.451665,
+        "state_changed_ago_s": 1.733,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": null,
         "view_size": [
           12.0,
           116.0
         ],
-        "pump_loops_per_sec": 7.7,
-        "pump_sleep_ms": 26.2,
+        "pump_loops_per_sec": 27.1,
+        "pump_sleep_ms": 29.4,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
@@ -205,8 +266,9 @@
       "step": "03-handle-hover-no-flicker",
       "note": "松手后鼠标仍在条上：不许自动弹开",
       "window_png": "docs/evidence/03-handle-hover-no-flicker.png",
+      "opaque_pct": 97.701,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -227,18 +289,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "collapsed",
+        "dragging": false,
         "art": "idle.svg",
         "caption_drawn": "",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 28.8,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646684.9594471,
-        "state_age_s": 6.019,
+        "state_at": 1790702190.451665,
+        "state_changed_ago_s": 2.107,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": null,
         "view_size": [
           12.0,
           116.0
         ],
-        "pump_loops_per_sec": 12.8,
-        "pump_sleep_ms": 4.9,
+        "pump_loops_per_sec": 133.8,
+        "pump_sleep_ms": 7.8,
         "state": "idle",
         "caption": "xiaocc · 待命"
       }
@@ -247,8 +316,9 @@
       "step": "04-hover-expanded",
       "note": "鼠标移到把手条 → 展开（贴在右边缘）",
       "window_png": "docs/evidence/04-hover-expanded.png",
+      "opaque_pct": 19.165,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -257,7 +327,7 @@
         "ignores_mouse_events": true,
         "ns_frame": [
           1352.0,
-          467.0,
+          454.0,
           160.0,
           194.0
         ],
@@ -269,18 +339,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "collapsed",
+        "dragging": false,
         "art": "idle.svg",
         "caption_drawn": "",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 28.8,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646684.9594471,
-        "state_age_s": 7.375,
+        "state_at": 1790702190.451665,
+        "state_changed_ago_s": 2.468,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": null,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 8.1,
-        "pump_sleep_ms": 8.0,
+        "pump_loops_per_sec": 133.8,
+        "pump_sleep_ms": 10.8,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
@@ -290,8 +367,9 @@
       "step": "05-leave-recalls",
       "note": "鼠标离开 → 再次收起",
       "window_png": "docs/evidence/05-leave-recalls.png",
+      "opaque_pct": 97.557,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -300,7 +378,7 @@
         "ignores_mouse_events": true,
         "ns_frame": [
           1500.0,
-          519.0,
+          506.0,
           12.0,
           116.0
         ],
@@ -312,18 +390,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "collapsed",
+        "dragging": false,
         "art": "idle.svg",
         "caption_drawn": "",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 28.8,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646684.9594471,
-        "state_age_s": 9.64,
+        "state_at": 1790702190.451665,
+        "state_changed_ago_s": 2.821,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": null,
         "view_size": [
           12.0,
           116.0
         ],
-        "pump_loops_per_sec": 4.6,
-        "pump_sleep_ms": 6.4,
+        "pump_loops_per_sec": 133.8,
+        "pump_sleep_ms": 9.9,
         "state": "idle",
         "caption": "xiaocc · 待命"
       }
@@ -332,8 +417,9 @@
       "step": "06-state-idle",
       "note": "idle 动作 float",
       "window_png": "docs/evidence/06-state-idle.png",
+      "opaque_pct": 19.17,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -354,18 +440,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "anchor",
+        "dragging": false,
         "art": "idle.svg",
         "caption_drawn": "",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 31.0,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646696.320083,
-        "state_age_s": 0.603,
+        "state_at": 1790702193.9750478,
+        "state_changed_ago_s": 0.602,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": null,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 38.1,
-        "pump_sleep_ms": 19.2,
+        "pump_loops_per_sec": 92.0,
+        "pump_sleep_ms": 22.4,
         "state": "idle",
         "caption": "xiaocc · 待命"
       },
@@ -375,8 +468,9 @@
       "step": "07-state-working",
       "note": "working 动作 busy",
       "window_png": "docs/evidence/07-state-working.png",
+      "opaque_pct": 21.964,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -397,18 +491,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "anchor",
+        "dragging": false,
         "art": "working.svg",
         "caption_drawn": "xiaocc · 正在执行 read_file",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 31.0,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646698.940363,
-        "state_age_s": 0.603,
+        "state_at": 1790702194.679803,
+        "state_changed_ago_s": 0.602,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": 45.0,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 3.9,
-        "pump_sleep_ms": 18.4,
+        "pump_loops_per_sec": 92.0,
+        "pump_sleep_ms": 23.0,
         "state": "working",
         "caption": "xiaocc · 正在执行 read_file"
       },
@@ -418,8 +519,9 @@
       "step": "08-state-error",
       "note": "error 动作 wobble",
       "window_png": "docs/evidence/08-state-error.png",
+      "opaque_pct": 21.025,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -440,18 +542,25 @@
         ],
         "anchor_ok": true,
         "anchor_state": "anchor",
+        "dragging": false,
         "art": "error.svg",
         "caption_drawn": "xiaocc · 出错了：状态源超时",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 25.5,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646701.555777,
-        "state_age_s": 0.602,
+        "state_at": 1790702195.400099,
+        "state_changed_ago_s": 0.602,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": 90.0,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 6.9,
-        "pump_sleep_ms": 18.2,
+        "pump_loops_per_sec": 23.6,
+        "pump_sleep_ms": 23.6,
         "state": "error",
         "caption": "xiaocc · 出错了：状态源超时"
       },
@@ -461,8 +570,9 @@
       "step": "09-state-done",
       "note": "done 动作 cheer",
       "window_png": "docs/evidence/09-state-done.png",
+      "opaque_pct": 20.405,
       "probe": {
-        "window_number": 8115,
+        "window_number": 15935,
         "visible": true,
         "level": 3,
         "alpha": 1.0,
@@ -483,25 +593,32 @@
         ],
         "anchor_ok": true,
         "anchor_state": "anchor",
+        "dragging": false,
         "art": "done.svg",
         "caption_drawn": "xiaocc · 搞定",
+        "badge_drawn": "",
+        "badge_alpha": 0.0,
+        "paints_per_sec": 27.4,
+        "click_action": "all",
         "state_source": "demo",
-        "state_at": 1790646704.173362,
-        "state_age_s": 0.604,
+        "state_at": 1790702196.1180139,
+        "state_changed_ago_s": 0.602,
+        "state_seen_at": null,
+        "state_seen_age_s": null,
         "state_ttl_s": 12.0,
         "view_size": [
           160.0,
           194.0
         ],
-        "pump_loops_per_sec": 6.9,
-        "pump_sleep_ms": 16.7,
+        "pump_loops_per_sec": 26.4,
+        "pump_sleep_ms": 24.5,
         "state": "done",
         "caption": "xiaocc · 搞定"
       },
       "desktop_png": "docs/evidence/09-state-done.desktop.png"
     }
   ],
-  "passed": 20,
+  "passed": 29,
   "failed": [],
-  "finished": "2026-09-29 09:51:46"
+  "finished": "2026-09-30 01:16:36"
 }

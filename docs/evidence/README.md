@@ -32,8 +32,8 @@
 | `03-handle-hover-no-flicker.png` | 鼠标移到把手条上时不抖动（连续两帧位置一致） |
 | `04-hover-expanded.png` | 悬停展开后的完整窗口 |
 | `05-leave-recalls.png` | 鼠标离开后重新收起 |
-| `06~09-state-*.png` | 四个代表性状态用对了角色包里的 `assets/<状态>.svg`（idle / working / error / done） |
-| `11-at-*.png` | `--backend-opt at=...` 各方位真开窗口抓的图；`11-err-*.png` 是三种错误提示的退出码 |
+|| `06-state-idle.png`、`07-state-working.png`、`08-state-error.png`、`09-state-done.png` | 四个代表性状态用对了角色包里的 `assets/<状态>.svg`（idle / working / error / done） |
+|| `11-default-top-right.png`、`11-at-top-left.png`、`11-at-bottom-left.png`、`11-at-bottom-right.png`、`11-at-center.png`、`11-at-xy.png` | `--backend-opt at=...` 各方位真开窗口抓的图 |
 | `11-at-bottom-left.png` | 走真实 CLI（`xiaocc run --source hermes -b appkit`）起的窗口：状态取自当时活着的 Hermes 会话（底部那行是它的会话标签），可当「CLI 真跑」的证据 |
 | `13-art-states-montage.png` | 7 个状态的对照图（原尺寸 + 60px + 32px）：证明 7 档一眼能区分、缩到 60px 仍认得出来 |
 | `evidence.json` | 上面每一步的断言明细（层级 / 透明度 / 穿透 / 尺寸 / 视图是否跟窗口） |

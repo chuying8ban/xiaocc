@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import os
 import re
+import subprocess
 import sys
 
 # 判据①：来源声明里不许出现的措辞。这三个词都把「AI 辅助生成 + 人工校对」
@@ -135,6 +136,11 @@ class RepoIndex:
 def rel(root: str, path: str) -> str:
     """相对仓库根、统一用 / 分隔，输出里就是这个形式。"""
     return os.path.relpath(path, root).replace(os.sep, "/")
+
+
+def read_text(path: str) -> str:
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        return handle.read()
 
 
 def read_lines(path: str) -> list[str]:
@@ -298,6 +304,99 @@ def check_declared_paths(root: str, report: Report) -> None:
                 )
 
 
+# 判据④：`docs/` 下的文件必须「从入口可达」。
+#
+# 为什么必须是这个口径（两个反例都是实测撞出来的）：
+#   * 「被任意文件引用一次」——`docs/quota.md` 当时只有两条**源码注释**提到它，判据绿，可读者一步也走不到；
+#   * 「被某份 md 引用一次」——A↔B 两个互相引用的文件会一起判绿，整体其实是孤岛。
+# 所以只认「从 README.md / README_EN.md 出发、顺着 md 之间的相对链接可达」：
+#   * md 文件：要能顺着链接走到；
+#   * 非 md 文件（图 / 原型 html）：要在可达 md 的正文里被点名（写文件名即可）。
+# 范围刻意只到 `docs/`：`src/**/assets/**` 那些矢量是**随代码分发**的资产（由 character.json 引用），
+# 本就不该进文档，扫它们只会得到几十条噪音然后把这条判据关掉。
+ENTRY_DOCS = ("README.md", "README_EN.md")
+LINK_RE = re.compile(r"\]\(([^)]+)\)")
+SKIP_LINK_PREFIXES = ("http://", "https://", "#", "mailto:")
+
+
+def md_links(text: str) -> list[str]:
+    """正文里 `](target)` 形式的链接目标，去掉 #锚点 与外部 URL。"""
+    found: list[str] = []
+    for raw in LINK_RE.findall(text):
+        target = raw.split("#", 1)[0].strip().strip("<>")
+        if not target or target.startswith(SKIP_LINK_PREFIXES):
+            continue
+        found.append(target)
+    return found
+
+
+def reachable_markdown(root: str, report: Report) -> set[str]:
+    """从入口 md 出发顺着相对链接走一圈，返回可达 md 的相对路径集合。"""
+    queue: list[str] = []
+    for entry in ENTRY_DOCS:
+        if os.path.isfile(os.path.join(root, entry)):
+            queue.append(entry)
+        else:
+            report.fail(entry, 0, "入口文档不存在（判据④没法从这儿出发）")
+    reached: set[str] = set()
+    while queue:
+        current = queue.pop(0)
+        if current in reached:
+            continue
+        path = os.path.join(root, current)
+        if not os.path.isfile(path):
+            continue
+        reached.add(current)
+        for target in md_links(read_text(path)):
+            if not target.endswith(".md"):
+                continue
+            resolved = rel(root, os.path.normpath(os.path.join(os.path.dirname(path), target)))
+            if resolved.startswith(".."):
+                continue
+            if os.path.isfile(os.path.join(root, resolved)):
+                queue.append(resolved)
+    return reached
+
+
+def published_files(root: str) -> list[str]:
+    """会被发布出去的文件清单 = git 跟踪的文件。
+
+    为什么不用文件系统遍历：`docs/` 下有 `.DS_Store`、`docs/evidence/*.desktop.png` 这些
+    **`.gitignore` 里排除、永远不会发布**的东西（连桌面一起截的图，曾把桌面内容带进仓库）。
+    判据只该管"会被发布的那批"，用 `git ls-files` 一次拿到最准；git 不在就退回遍历文件系统。
+    """
+    try:
+        done = subprocess.run(
+            ["git", "ls-files", "-z"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except (OSError, subprocess.CalledProcessError):
+        return walk_repo_files(root)
+    return sorted(path for path in done.stdout.split("\0") if path)
+
+
+def check_docs_reachable(root: str, report: Report) -> None:
+    """判据④：docs/ 下每个文件都得有人能走到。"""
+    report.section("判据④ docs/ 下的文件必须从入口可达（README.md / README_EN.md）")
+    reached = reachable_markdown(root, report)
+    if not reached:
+        report.fail("README.md", 0, "入口文档一份都没读到，判据④无法判定")
+        return
+    mentions = "\n".join(read_text(os.path.join(root, name)) for name in sorted(reached))
+    for path in published_files(root):
+        if not path.startswith("docs/"):
+            continue
+        if path in reached:
+            report.ok(path, 0, "可从入口顺着链接走到")
+        elif os.path.basename(path) in mentions or path in mentions:
+            report.ok(path, 0, "在可达文档里被点名")
+        else:
+            report.fail(path, 0, "没人引用：读者从 README 走不到它（补进 docs/design/README.md 的清单，或在文档里点名）")
+
+
 def check_gate_scripts(root: str, report: Report) -> None:
     """判据③：文档逐字点名的门禁脚本还在不在 `scripts/`。"""
     report.section("判据③ 护栏：文档点名的 13 支门禁脚本必须还在 scripts/")
@@ -344,6 +443,7 @@ def main(argv: list[str] | None = None) -> int:
     check_wording(root, report)
     check_declared_paths(root, report)
     check_gate_scripts(root, report)
+    check_docs_reachable(root, report)
     return report.summary()
 
 
