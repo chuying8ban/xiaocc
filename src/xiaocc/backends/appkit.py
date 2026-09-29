@@ -32,7 +32,7 @@ from typing import Any
 
 from ..characters import Character
 from ..engine import Render
-from ..protocol import State
+from ..protocol import STATE_TTL, State
 from . import appkit_art
 from . import window_layout as wl
 from .anchor_store import anchor_path as _anchor_path
@@ -522,6 +522,10 @@ class AppKitBackend(Backend):
             return {"window": None, "driver": DRIVER}
         frame = self._window.frame()
         anchor_state, anchor_ok = self._anchor_relation()
+        #: 当前这一帧的事件 —— 可能是 None（窗口已建、引擎还没推来第一帧），
+        #: 所以下面那四个 ``state_*`` 字段都必须容得下它。
+        event = self._frame.event if self._frame is not None else None
+        state = event.state if event is not None else None
         info: dict[str, Any] = {
             "window_number": int(self._window.windowNumber()),
             "visible": bool(self._window.isVisible()),
@@ -550,6 +554,25 @@ class AppKitBackend(Backend):
             "art": self._last_art,
             #: 实际画上去的文案（不是引擎的那份原文）—— 待机时应当为空
             "caption_drawn": self._last_caption_drawn,
+            #: —— 状态新鲜度的自证据：doctor 从进程外判「画面是不是卡在某个状态不动」
+            #: 就看这四行（典型病因：源把毫秒当秒写进 ``at``，事件于是永不过期）——
+            #: 这个状态是**哪个源**说的（如 ``hermes:state.db``）；None = 还没有帧。
+            "state_source": event.source if event is not None else None,
+            #: **源给的**事件时间戳（epoch 秒，即 ``StatusEvent.at``）。
+            #: 命名坑（别混）：它**不是** :meth:`_write_probe` 里那个 ``at`` ——
+            #: 那个是**快照落盘的时刻**，这个是**事件发生的时刻**，两者相差 ``state_age_s``。
+            "state_at": event.at if event is not None else None,
+            #: 写盘那一刻，这条事件有多旧（秒）。注意 ``StatusEvent.age()`` 对负值做了夹取
+            #: （``max(0.0, ...)``），所以「源给了未来时间戳」（毫秒当秒写就是这一类）
+            #: 在这里只会显示 0 —— 光看它分不清「刚刚发生」和「时间戳写错」，
+            #: 得拿 ``state_at`` 跟快照 ``at`` 比：``state_at`` 反而超前，就是源写错了。
+            #: （``from_json`` 那道 60 秒护栏只挡得住 JSON 源；Python 侧直接构造
+            #: ``StatusEvent(at=...)`` 的源没人挡，所以这行自证据必须有。）
+            "state_age_s": round(event.age(), 3) if event is not None else None,
+            #: 这个状态的保鲜期（秒），照抄协议里的 ``STATE_TTL[state]``；
+            #: 没有 TTL 的状态（``idle``/``offline``）写 None（JSON null）。
+            #: ``state_age_s`` 长期超过它 = 画面卡在一个早该过期的状态上。
+            "state_ttl_s": STATE_TTL[state] if state is not None else None,
             #: 视图尺寸，应当与窗口尺寸一致（不一致说明绘制坐标系会错位）
             "view_size": [
                 round(self._view.bounds().size.width, 1),
