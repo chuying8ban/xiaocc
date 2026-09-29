@@ -344,3 +344,72 @@ def test_rect_math_is_consistent():
     assert rect.size == (10.0, 20.0)
     assert rect.moved(3, 4).x == 3
     assert math.isclose(rect.moved(3, 4).bottom, 24)
+
+
+# —— 收起 ↔ 展开必须是个「定点」（第三条曾被真机抓出来的不变量）——————————
+# 事故：贴着左/右边缘的桌宠每次收展都往上走 13px，日志里
+# (1352,126) →[collapse](1500,152) →[expand](1352,113) →[collapse](1500,139) → …
+# 根因是收起与展开用了**不同的居中基准**：collapsed_rect 居中在角色本体上，
+# docked_rect(center=…) 居中在窗口上，而窗口比本体多一条固定高度的底部文案带。
+
+
+def _cycle_once(win: wl.Rect, edge: wl.Edge, *, canvas=CANVAS, scale: float = 1.0) -> tuple[wl.Rect, wl.Rect]:
+    """按 appkit 的顺序走一轮：窗口 → 本体 → 收起把手条 → 再展开成窗口。"""
+    body = wl.body_rect_of_window(win, canvas=canvas, scale=scale)
+    strip = wl.collapsed_rect(edge, SCREEN, body)
+    cross = strip.center.y if edge in (wl.Edge.LEFT, wl.Edge.RIGHT) else strip.center.x
+    center = wl.body_center_to_window_center(cross, edge)
+    return strip, wl.docked_rect(edge, SCREEN, wl.window_size_for(canvas, scale), center=center)
+
+
+def _cross(rect: wl.Rect, edge: wl.Edge) -> float:
+    """跨轴（左/右是 y，上/下是 x）上的**起点**。"""
+    return rect.y if edge in (wl.Edge.LEFT, wl.Edge.RIGHT) else rect.x
+
+
+def _cross_mid(rect: wl.Rect, edge: wl.Edge) -> float:
+    """跨轴上的**中心** —— 收起/展开对齐的就是它（别和上面 edge 在前的 _cross_center 混）。"""
+    center = rect.center
+    return center.y if edge in (wl.Edge.LEFT, wl.Edge.RIGHT) else center.x
+
+
+@pytest.mark.parametrize("edge", [wl.Edge.LEFT, wl.Edge.RIGHT, wl.Edge.TOP, wl.Edge.BOTTOM])
+@pytest.mark.parametrize("start_y", [40, 200, 480, 760])
+def test_collapse_expand_cycle_stops_moving(edge, start_y):
+    """来回收展，**第二轮之后**必须一动不动。
+
+    第一轮允许挪一次：窗口比把手条大，贴近屏幕角时居中会被夹取（越界不允许），
+    这是几何上必须的；真正要守的是**没有每循环重复的漂移** ——
+    事故版就是每循环稳定地往上 13px，一路爬出屏幕。
+    """
+    win = wl.Rect(1352, start_y, *wl.window_size_for(CANVAS))
+    seen = []
+    for _ in range(5):
+        strip, win = _cycle_once(win, edge)
+        seen.append(_cross(strip, edge))
+    assert max(seen[1:]) - min(seen[1:]) < 0.01, f"{edge} 边每循环都在漂：{seen}"
+
+
+@pytest.mark.parametrize("edge", [wl.Edge.LEFT, wl.Edge.RIGHT])
+def test_vertical_edges_swap_reference_by_half_caption_band(edge):
+    """左/右两条边的跨轴是 y —— 窗口比本体多半个文案带，必须补上，且不随缩放变化。"""
+    for scale in (1.0, 1.5):
+        assert wl.body_center_to_window_center(300.0, edge) == pytest.approx(300.0 + wl.CAPTION_BAND / 2)
+
+
+@pytest.mark.parametrize("edge", [wl.Edge.TOP, wl.Edge.BOTTOM])
+def test_horizontal_edges_keep_center_as_is(edge):
+    """上/下两条边的跨轴是 x —— 窗口只多两侧等宽留白，本体中心相对窗口中心不变。"""
+    assert wl.body_center_to_window_center(300.0, edge) == 300.0
+
+
+@pytest.mark.parametrize("edge", [wl.Edge.LEFT, wl.Edge.RIGHT, wl.Edge.TOP, wl.Edge.BOTTOM])
+def test_expanded_body_is_centred_on_the_strip(edge):
+    """展开后角色本体的中心必须落在把手条的中心上（这才是「定点」的直接成因）。
+
+    取屏幕中间的位置：贴角时居中会被夹取，那不是这条不变量管的。
+    """
+    win = wl.Rect(600, 300, *wl.window_size_for(CANVAS))
+    strip, expanded = _cycle_once(win, edge)
+    body = wl.body_rect_of_window(expanded, canvas=CANVAS)
+    assert _cross_mid(body, edge) == pytest.approx(_cross_mid(strip, edge))

@@ -506,6 +506,10 @@ class AppKitBackend(Backend):
         内存那份必须同步换，否则下一秒漂移自检就会拿旧锚点把用户刚拖好的窗口拽回去。
         """
         rect = self._window_local
+        if rect.x == self._anchor.x and rect.y == self._anchor.y:
+            # 原地点一下（按下即松手、没移动）也会走到这 —— 位置没变就别重写一遍：
+            # 否则日志里会多出一行一模一样的「锚点已更新」，运维做取证时分不清哪次是真搬家。
+            return True
         self._anchor = rect
         if save_anchor(rect.x, rect.y):
             log.info("锚点已更新（用户拖动）: (%d,%d)", rect.x, rect.y)
@@ -844,9 +848,16 @@ class AppKitBackend(Backend):
         """把贴边的把手条弹回完整角色（跨轴位置不变，仍贴着同一条边）。"""
         strip = self._window_local
         edge = self._dock.edge
+        # 收起时把手条是居中在**本体**上的，而 docked_rect 居中在**窗口**上 ——
+        # 两者差半个文案带（左/右两条边）。不换算的话每次收/展都往上漂 13px。
         center = strip.center.y if edge in (wl.Edge.LEFT, wl.Edge.RIGHT) else strip.center.x
         self._set_window_rect(
-            wl.docked_rect(edge, self._space().screen, self._window_size(), center=center),
+            wl.docked_rect(
+                edge,
+                self._space().screen,
+                self._window_size(),
+                center=wl.body_center_to_window_center(center, edge),
+            ),
             reason="expand",
         )
 

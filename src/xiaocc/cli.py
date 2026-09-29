@@ -369,7 +369,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(levelname)s %(name)s: %(message)s",
+        # 带时间戳：排查「收展震荡 / 漂移 / 锚点写入」时要能把日志和墙钟对上
+        # （运维的 doctor 用 `grep -E "位置变化|锚点已更新"` 读，不吃行首，加前缀不影响）。
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        datefmt="%m-%d %H:%M:%S",
     )
     if args.command == "sources":
         return _cmd_sources()

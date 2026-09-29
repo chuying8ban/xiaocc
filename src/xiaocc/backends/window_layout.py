@@ -38,6 +38,7 @@ __all__ = [
     "Point",
     "Pose",
     "Rect",
+    "body_center_to_window_center",
     "body_rect_of_window",
     "choose_edge",
     "clamp",
@@ -214,6 +215,31 @@ def body_anchor(center: float | None, low: float, span: float, size: float) -> f
     if center is None:
         return low + (span - size) / 2.0
     return clamp(center - size / 2.0, low, low + span - size)
+
+
+def body_center_to_window_center(
+    center: float,
+    edge: Edge,
+    *,
+    caption_band: float = CAPTION_BAND,
+) -> float:
+    """把「角色本体中心」换算成 :func:`docked_rect` 要的「窗口中心」。
+
+    两个方向必须用**同一个基准**，否则每循环漂一次：
+
+    * :func:`collapsed_rect` 把把手条居中在**本体**上（``body.center``）；
+    * ``docked_rect(center=…)`` 居中的是**窗口**。
+
+    窗口比本体多一条**固定高度**的底部文案带，所以纵轴（左/右两条边的跨轴是 y）两者差
+    ``CAPTION_BAND / 2``。真机症状就是「贴到右边后，每次收/展都往上走 13px」——
+    ``(1352,126) →[collapse](1500,152) →[expand](1352,113) → …`` 一路往上爬。
+
+    横轴（上/下两条边的跨轴是 x）没有这个偏移：窗口在 x 方向只多两侧等宽的留白，
+    本体中心相对窗口中心**不变**，所以原样传回。
+    """
+    if edge in (Edge.TOP, Edge.BOTTOM):
+        return center
+    return center + caption_band / 2.0
 
 
 def window_size_for(
