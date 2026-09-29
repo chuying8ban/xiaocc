@@ -950,7 +950,7 @@ def main() -> int:
     if failures:
         say(f"结果：FAIL（{len(failures)} 项）—— " + "；".join(failures))
         return 1
-    say(f"结果：PASS（{len(records)}/10 张）")
+    say(f"结果：PASS（{len(records)}/{len(SHOT_NAMES)} 张）")
     return 0
 
 
