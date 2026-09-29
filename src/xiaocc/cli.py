@@ -118,6 +118,10 @@ def _cmd_probe() -> int:
     顺带读那四个 ``state_*`` 字段：状态**该退档没退**（保鲜期早过了还挂在桌面上）说明源把时间戳
     写坏了（典型是把毫秒当秒写进 ``at``，事件于是永不过期）。这条**只提示、不改判** ——
     退出码的判据始终是「快照新鲜、圈速 ≈ fps、窗口在锚点上」，doctor / CI 的断言不受影响。
+
+    两个年龄别混（口径见 ``appkit.probe()``）：``state_seen_age_s`` = 源**这份报告**多旧
+    （每拍都刷），判「该退档没退」只能用它；``state_changed_ago_s`` = 该状态**挂屏**多久
+    （只在内容变化时刷），长任务期间必然超过保鲜期 —— 那是活儿久，不是病，所以只打印、不判。
     """
     target = _probe_file()
     try:
@@ -153,21 +157,25 @@ def _cmd_probe() -> int:
         except (TypeError, ValueError):
             return None
 
-    state_at = _num(info.get("state_at"))          # 源给的事件时刻（不是快照落盘时刻）
-    state_age = _num(info.get("state_age_s"))      # 写盘那一刻这条事件有多旧
-    state_ttl = _num(info.get("state_ttl_s"))      # None = 不过期（idle/offline）
-    grace = 5.0                                    # 容差与运维 doctor 一致：5s 内算正常抖动
+    state_at = _num(info.get("state_at"))                # 该状态最后一次**变化**的时刻
+    seen_at = _num(info.get("state_seen_at"))            # 源最近一次说话的时刻
+    seen_age = _num(info.get("state_seen_age_s"))        # 源这份报告多旧 → 判卡住看它
+    changed_ago = _num(info.get("state_changed_ago_s"))  # 该状态已挂屏多久 → 只打印、不判
+    state_ttl = _num(info.get("state_ttl_s"))            # None = 不过期（idle/offline）
+    grace = 5.0                                          # 容差与运维 doctor 一致：5s 内算正常抖动
 
     source = info.get("state_source")
-    if state_age is None:
-        print(f"状态源={source or '（还没有帧）'} 状态时间=（无）"
-              "（这份快照里没有 state_age_s —— 显示层太老？）")
+    # 挂屏时长是有用的软信号（一眼看出这个状态演了多久），但它不参与下面的判断
+    on_screen = "" if changed_ago is None else f"  该状态已挂屏 {changed_ago:.1f}s"
+    if seen_age is None:
+        print(f"状态源={source or '（还没有帧）'} 源报告=（无）{on_screen}"
+              "（这份快照里没有 state_seen_age_s —— 显示层太老？）")
     elif state_ttl is None:  # idle/offline 本来就不过期，多久都不算卡
-        print(f"状态源={source} 状态时间={state_age:.1f}s 前（保鲜期 不过期）")
+        print(f"状态源={source} 源报告 {seen_age:.1f}s 前（保鲜期 不过期）{on_screen}")
     else:
-        verdict = "该退档没退" if state_age > state_ttl else "还新鲜"
-        print(f"状态源={source} 状态时间={state_age:.1f}s 前"
-              f"（保鲜期 {state_ttl:g}s；{verdict}）")
+        verdict = "该退档没退" if seen_age > state_ttl else "还新鲜"
+        print(f"状态源={source} 源报告 {seen_age:.1f}s 前"
+              f"（保鲜期 {state_ttl:g}s；{verdict}）{on_screen}")
 
     # 一条警告行，**不参与退出码**（不进 reasons）：保鲜期为 null 时永远别报 —— idle/offline
     # 不过期，「状态老了」在它身上不是病；而给未来时间戳的源报出来的状态必然带 TTL
@@ -175,14 +183,21 @@ def _cmd_probe() -> int:
     snapshot_at = _num(info.get("at"))
     stuck: list[str] = []
     if state_ttl is not None:
-        if state_age is not None and state_age > state_ttl + grace:
+        if seen_age is not None and seen_age > state_ttl + grace:
             stuck.append(
-                f"状态已 {state_age:.1f}s，超过保鲜期 {state_ttl:g}s + {grace:.0f}s 容差"
+                f"源这份报告已 {seen_age:.1f}s，超过保鲜期 {state_ttl:g}s + {grace:.0f}s 容差"
                 f"（画面卡在「{info.get('state')}」上没退档）"
             )
-        if state_at is not None and snapshot_at is not None and state_at > snapshot_at + grace:
+        # 「未来时间戳」两个 at 都看得出来（同一只源写的）：优先用最新那份，
+        # 老快照里没有 state_seen_at 就退回 state_at。
+        reported_at = seen_at if seen_at is not None else state_at
+        if (
+            reported_at is not None
+            and snapshot_at is not None
+            and reported_at > snapshot_at + grace
+        ):
             stuck.append(
-                f"源给的时间戳比快照落盘还超前 {state_at - snapshot_at:,.0f}s"
+                f"源给的时间戳比快照落盘还超前 {reported_at - snapshot_at:,.0f}s"
                 "（典型病因：把毫秒当秒写进 at ⇒ 事件永不过期）"
             )
     if stuck:
@@ -345,6 +360,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
             frame = engine.tick()
             if frame is not None:
                 backend.render(frame)
+            # 两条路都要 observe：tick() 返回 None 的**静默拍**里，engine.frame 也换上了
+            # 时间戳新鲜的那份，显示层靠它才知道「源这份报告多旧」（见 Backend.observe）。
+            # 约定是只记不画，所以放在 render() 之后 / idle() 之前都不影响画面与节拍。
+            backend.observe(engine.frame)
             if args.once:
                 break
             # 这一轮的时间**必须**被走掉，哪怕 tick() 没吐出新帧：引擎只在状态变化时给帧，

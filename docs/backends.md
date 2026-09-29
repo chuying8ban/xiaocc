@@ -15,9 +15,22 @@ class MyBackend(Backend):
     self_paced = False        # True = 本层自己消化节拍（GUI 应当置 True）
 
     def render(self, frame: Render) -> None: ...   # 必须实现（引擎只在状态变化时调用）
+    def observe(self, frame: Render) -> None: ...  # 可选：**每拍**都调，只准记不准画
     def linger(self, seconds: float) -> None: ...  # 可选：截图/肉眼验收时多留一会儿
     def close(self) -> None: ...                   # 可选：收尾
 ```
+
+**`render()` 不是每拍都调，`observe()` 才是。** `Engine.tick()` 只在**内容**变化时返回帧；
+同一状态持续时走静默分支（换掉自己那份 `Render` 后 `return None`），`render()` 根本不会被调用。
+所以想知道「源这份报告多旧」必须实现 `observe()`：
+
+| 你想知道的 | 用哪个 |
+| --- | --- |
+| 这个状态**挂屏多久**了 | `render()` 那次拿到的 `frame.event.at`（会被冻住，就是「挂屏时长」） |
+| 源**最近一次**报告有多旧 | `observe()` 每次收到的 `frame.event.age()` |
+
+判「该退档没退 / 事件永不过期」要用后者：长任务（`working` 持续 45s+）会让前者超过保鲜期，
+那是正常干活、不是卡死。`appkit` 的自证据就是这么分开的（`state_changed_ago_s` 对 `state_seen_age_s`）。
 
 `Render` 给出的东西（就这些，够画了）：
 

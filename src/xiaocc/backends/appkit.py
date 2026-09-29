@@ -294,6 +294,10 @@ class AppKitBackend(Backend):
         self._space_cache: _Space | None = None
         self._window_local: wl.Rect = wl.Rect(0.0, 0.0, 0.0, 0.0)
         self._frame: Render | None = None
+        #: 引擎**每拍**递过来的当前帧（含内容没变的静默拍，见 :meth:`observe`）—— 只记不画。
+        #: 和 ``_frame`` 的分工：``_frame`` 是「画上屏的那帧」（内容变化才更新）⇒ 答
+        #: 「这个状态挂屏多久」；``_observed`` 每拍都刷 ⇒ 答「源这份报告多旧」。
+        self._observed: Render | None = None
         self._character: Character | None = None
         self._dock = wl.Dock()
         #: 窗口的「家」（含窗口尺寸）：用户拖动后会更新并落盘（见 anchor_store），
@@ -353,6 +357,18 @@ class AppKitBackend(Backend):
         # 紧跟其后的 idle() 算出 gap ≈ 0，就不会再多跑一段（否则有帧的那轮要花两拍）。
         self._last_tick = beat_start
 
+    def observe(self, frame: Render) -> None:
+        """记下引擎这一拍的当前帧 —— **只存不画**（画是 :meth:`render` 的事）。
+
+        内容没变的静默拍里 ``tick()`` 返回 ``None``、``render()`` 不会被调用，但
+        ``engine.frame`` 的 ``event.at`` 仍然是新鲜的。没有这个钩子，``_frame.event`` 会
+        一直冻在「该状态最后一次**变化**的时刻」，:meth:`probe` 就只剩「挂屏多久」这一个
+        读数 —— 长工具调用期间它必然超过保鲜期，doctor 于是把一个正在干活的桌宠报成
+        「事件永不过期」。这里绝不调 ``_paint()``：静默拍占主循环的绝大多数轮次，
+        每拍重画等于把引擎省下来的重画全还回去，CPU 回到忙等那一档。
+        """
+        self._observed = frame
+
     def idle(self) -> None:
         """本轮没有新帧：把「到下一个节拍」的剩余时间在自己的事件循环里走掉。
 
@@ -389,6 +405,7 @@ class AppKitBackend(Backend):
         self._window = None
         self._view = None
         self._frame = None
+        self._observed = None
         self._last_fingerprint = None
 
     # —— 供脚本/自动化调用（和鼠标走同一套代码路径）—————————————————————————
@@ -555,9 +572,15 @@ class AppKitBackend(Backend):
             return {"window": None, "driver": DRIVER}
         frame = self._window.frame()
         anchor_state, anchor_ok = self._anchor_relation()
-        #: 当前这一帧的事件 —— 可能是 None（窗口已建、引擎还没推来第一帧），
-        #: 所以下面那四个 ``state_*`` 字段都必须容得下它。
+        #: 两个事件、两个口径（都可能是 None：窗口已建、引擎还没推来第一帧，
+        #: 所以下面每个 ``state_*`` 字段都得容得下它）：
+        #:   ``event`` 取自 ``_frame``（**画上屏**的那帧，只在内容变化时更新）
+        #:            ⇒ 答「这个状态**挂屏**多久」；
+        #:   ``seen``  取自 ``_observed``（:meth:`observe` 每拍记下、静默拍也记）
+        #:            ⇒ 答「源**这份报告**多旧」。
+        #: 混用这两个口径就是 doctor ⑬「长工具调用被报成永不过期」的病因。
         event = self._frame.event if self._frame is not None else None
+        seen = self._observed.event if self._observed is not None else None
         state = event.state if event is not None else None
         info: dict[str, Any] = {
             "window_number": int(self._window.windowNumber()),
@@ -588,23 +611,40 @@ class AppKitBackend(Backend):
             #: 实际画上去的文案（不是引擎的那份原文）—— 待机时应当为空
             "caption_drawn": self._last_caption_drawn,
             #: —— 状态新鲜度的自证据：doctor 从进程外判「画面是不是卡在某个状态不动」
-            #: 就看这四行（典型病因：源把毫秒当秒写进 ``at``，事件于是永不过期）——
+            #: 就看这几行（典型病因：源把毫秒当秒写进 ``at``，事件于是永不过期）——
             #: 这个状态是**哪个源**说的（如 ``hermes:state.db``）；None = 还没有帧。
             "state_source": event.source if event is not None else None,
-            #: **源给的**事件时间戳（epoch 秒，即 ``StatusEvent.at``）。
+            #: **源给的**事件时间戳（epoch 秒，即 ``StatusEvent.at``），取自**画上屏**的那帧
+            #: ⇒ 语义是「该状态最后一次**变化**的时刻」，不是「源最近一次报告的时刻」
+            #: （那个是下面的 ``state_seen_at``）。
             #: 命名坑（别混）：它**不是** :meth:`_write_probe` 里那个 ``at`` ——
-            #: 那个是**快照落盘的时刻**，这个是**事件发生的时刻**，两者相差 ``state_age_s``。
+            #: 那个是**快照落盘的时刻**，这个是**事件发生的时刻**，
+            #: 两者相差 ``state_changed_ago_s``。
             "state_at": event.at if event is not None else None,
-            #: 写盘那一刻，这条事件有多旧（秒）。注意 ``StatusEvent.age()`` 对负值做了夹取
+            #: **该状态已挂屏多久**（秒）= 写盘那一刻 − ``state_at``。原名 ``state_age_s``，
+            #: 名不副实所以改掉了：``render()`` 只在内容变化时被调（内容没变走引擎的静默更新
+            #: 分支），所以这里量到的是「这个状态在桌面上挂了多久」，**不是**「源这份报告多旧」。
+            #: 保留它是因为「挂屏多久」本身是有用的软信号，但**别拿它跟保鲜期比** ——
+            #: 一次长工具调用（``working`` 挂 45s+）就足以让它超过 TTL，那不是病；
+            #: 判「该退档没退」请用下面的 ``state_seen_age_s``。
+            #: 另外 ``StatusEvent.age()`` 对负值做了夹取
             #: （``max(0.0, ...)``），所以「源给了未来时间戳」（毫秒当秒写就是这一类）
             #: 在这里只会显示 0 —— 光看它分不清「刚刚发生」和「时间戳写错」，
             #: 得拿 ``state_at`` 跟快照 ``at`` 比：``state_at`` 反而超前，就是源写错了。
             #: （``from_json`` 那道 60 秒护栏只挡得住 JSON 源；Python 侧直接构造
             #: ``StatusEvent(at=...)`` 的源没人挡，所以这行自证据必须有。）
-            "state_age_s": round(event.age(), 3) if event is not None else None,
+            "state_changed_ago_s": round(event.age(), 3) if event is not None else None,
+            #: 最近一次**轮询到**的事件的时间戳（:meth:`observe` 每拍记，静默拍也记）
+            #: ⇒ 这才是「源最近一次说话的时刻」。
+            "state_seen_at": seen.at if seen is not None else None,
+            #: **源这份报告多旧**（秒）= 写盘那一刻 − ``state_seen_at``。
+            #: 判「状态该退档没退」看它：源每拍都在刷新 ⇒ 长任务期间它也接近 0，
+            #: 只有源真停了（或时间戳写坏）才会一直涨。与上面那个数的差 = 这个状态
+            #: 演了多久但源一直在为它续命（长任务时两者会差出几十秒）。
+            "state_seen_age_s": round(seen.age(), 3) if seen is not None else None,
             #: 这个状态的保鲜期（秒），照抄协议里的 ``STATE_TTL[state]``；
             #: 没有 TTL 的状态（``idle``/``offline``）写 None（JSON null）。
-            #: ``state_age_s`` 长期超过它 = 画面卡在一个早该过期的状态上。
+            #: ``state_seen_age_s`` 长期超过它 = 源早不说话了、画面却还卡在这个状态上。
             "state_ttl_s": STATE_TTL[state] if state is not None else None,
             #: 视图尺寸，应当与窗口尺寸一致（不一致说明绘制坐标系会错位）
             "view_size": [
