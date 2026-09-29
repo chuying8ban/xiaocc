@@ -6,6 +6,23 @@
 
 现状按严重度排：🔴 必须清 / 🟡 建议清 / ✅ 已干净。
 
+## 决策与进度（2026-09-29 晚更新）
+
+- 第 1 条（历史身份）：@ops 决定**留到发布日做批处理**，理由是发布身份未定 + 重写要挑停手窗口。
+  理由成立，但两点补充：
+  1. **不必等一整天的工作窗口**：45 个提交的 `git rebase -r --root --exec` 在本地几秒完成，不碰网络；
+     真正需要的只是「重写那一刻没有别的进程在往这个仓库写提交」。要保的是**顺序**（重写必须是 push 前的最后一步），
+     不是时长。
+  2. **可以现在先止血、不必等发布身份定**：每多一个用兜底身份写出的提交，重写集就多一个
+     （今天 30/45）。`git config --local user.email "<发布邮箱或 GitHub noreply>"` 是一条不发散、不重写的命令，
+     定了就能把「新增泄漏」堵住 —— 发布日再一次性重写剩下的。
+- 第 4 条（桌面壁纸）：**无动作**，保持 `.gitignore` 那行即可。
+- 第 6 条：运行时产物已由 @ops `.gitignore` 掉（`728b297`）；`ops/baseline/*.bak` 暂留仓库（keepawake 的回滚凭据），
+  发布日随批处理移出，并同步改 `ops/README.md` §4 的回滚路径。
+- 第 2 条（空图）：@coder 已派 codex 做护栏（屏睡拒跑 rc=2、非透明像素 <2% 判空图、`opaque_pct` 进 evidence.json）。
+  注意副作用是**有意的**：屏睡时截图套件会从「假通过」变成「红」。真像素要等屏亮重抓，和 @ops 的补验任务同拍。
+- 第 3 条：`docs/evidence/evidence.json` 已清；plist 的模板化仍在 @ops/@coder 之间待定归属。
+
 ## 🔴 1. 提交历史里的身份（唯一「发出去就难改」的一项）
 
 `git log --format='%ae%ce' | grep -c 'a29285@'` → **30 / 45 个提交**带
@@ -82,6 +99,23 @@
 - 非官方免责声明在 `README_EN.md`（不与 DeepSeek / Hermes / Google / 小米及同类桌宠关联）。
 - 包名可用性：PyPI `xiaocc` 空、npm `xiaocc` 空、GitHub 仓库路径空（`xiaocc` 用户名 2014 年已被占，仓库挂自己账号下）。
 - 参考项目的提醒：它的角色帧**不属于 MIT**（`legacy/dafeiyu/` 原文排除），我们一帧都没用 —— 发布时别再引用。
+
+## 🟡 8. 固定临时名 / 原子写（@ops 的扫描结论需要修正一处）
+
+@ops 报「`src/ops/scripts` 里剩下的两处写盘都是 `tempfile.mkstemp`，**没有别的固定名**」——
+逐行扫下来**还剩一处固定名**：
+
+- `src/xiaocc/sources/file.py:126`：`FileSource.touch()` 用 `self.path.with_suffix(suffix + ".tmp")`
+  写临时文件再 `replace`，**名字是固定的 `<状态文件>.tmp`**。这正是面板刚踩的那一类（两个写者抢同一个临时名 →
+  其中一个 `replace` 扑空 ENOENT）。
+- 危害场景：file 源的整个用途就是**让别人来写那个状态文件**。生产者若也按常见约定写 `status.json.tmp` 再改名，
+  就会和 `touch()` 抢同一个临时文件。影响面窄（`touch()` 目前只在 `tests/test_sources.py` 5 处被调用，
+  是给测试/脚本用的辅助方法），但它会随公开仓库成为「原子写」的示例代码，建议一并换成 `mkstemp`
+  （和 `anchor_store.py:118`、`appkit.py:481` 同款，3 行）。
+
+另外三处**非原子写**（不是 bug，今天也没有并发写者，仅记录；改成原子写是三行的事）：
+`scripts/appkit_screenshots.py:345` 写 `docs/evidence/evidence.json`（**这是入库的产物**，被中断会留下半截 JSON）、
+`ops/xiaocc_watchdog.sh:90/133` 写停用留痕、`ops/xiaoccctl:238` 写 `state.json`。
 
 ## 人工项（脚本查不了，只能人定）
 
