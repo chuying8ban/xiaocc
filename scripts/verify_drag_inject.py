@@ -37,6 +37,8 @@ import time
 from itertools import pairwise
 from pathlib import Path
 
+import verify_log
+
 REPO = Path(__file__).resolve().parents[1]
 PY = REPO / ".venv" / "bin" / "python"
 
@@ -109,18 +111,39 @@ def opaque_ratio(img) -> float:
 IDLE_MIN_S = 5.0
 
 
+def environment_snapshot() -> dict[str, float | bool | None]:
+    """环境快照：``locked``（屏是否锁着）+ ``idle_s``（距上次真人输入几秒；**锁着时为 None**）。
+
+    留痕（``scripts/verify_log.py``）读的就是这一份 —— 判据（下面那个 rc=2 的前置）与证据
+    （盘上那行 JSON）必须是同一套读数口径（同一个函数，留痕时再读一次）。这个项目反复吃亏的
+    点正是同一件事抄两份，
+    然后各改各的。
+
+    锁着时**不去读空闲秒数**：前置第一条已经成立、判据用不上它，而这一读在拿不到 GUI 会话的
+    进程里（沙箱 / ssh 进来的 shell）不是报错、是**一直卡着** ⇒ 为了留痕多要一个数，把
+    「rc=2 说清环境不满足」这条最要紧的路换成挂死，是本末倒置。
+    """
+    session = Quartz.CGSessionCopyCurrentDictionary() or {}
+    if session.get("CGSSessionScreenIsLocked"):
+        return {"locked": True, "idle_s": None}
+    idle = Quartz.CGEventSourceSecondsSinceLastEventType(
+        Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType
+    )
+    return {"locked": False, "idle_s": float(idle)}
+
+
 def environment_blocker() -> str | None:
     """前置不满足的原因（None = 可以跑）。
 
     锁屏时注入的 HID 事件会被系统吞掉，量出来的是**假红**；手刚在动则合成事件与真人事件抢同一个
     指针，跟手几何也没意义。两者都能从进程外读到，所以不靠"等人走开"这种口头前提。
     """
-    session = Quartz.CGSessionCopyCurrentDictionary() or {}
-    if session.get("CGSSessionScreenIsLocked"):
+    snapshot = environment_snapshot()
+    if snapshot["locked"]:
         return "屏是锁着的（锁屏时注入的事件会被系统吞掉）"
-    idle = Quartz.CGEventSourceSecondsSinceLastEventType(
-        Quartz.kCGEventSourceStateHIDSystemState, Quartz.kCGAnyInputEventType
-    )
+    # `or 0.0`：万一是 None（读不到空闲秒数）就按"手刚动过"处理 ⇒ 宁可 rc=2 跳过，
+    # 也不要拿一个量不出来的环境去跑出一份没人信得过的数。
+    idle = snapshot["idle_s"] or 0.0
     if idle < IDLE_MIN_S:
         return f"鼠标/键盘刚动过（空闲 {idle:.1f}s < {IDLE_MIN_S:g}s）"
     return None
@@ -138,6 +161,8 @@ def main() -> int:
         # rc=2 与 FAIL(1) 分开：这是**环境不满足**，不是功能坏了（一条假红会误导人去改好代码）
         print(f"跳过（rc=2，环境不满足，**不是功能坏了**）：{blocker}")
         print("要跑就等屏解锁、手离开鼠标 5 秒再来；或在真的知道自己在做什么时加 --force。")
+        # 这一行留痕就是「锁屏强跑的 rc=0」与「环境干净的真绿」在盘上唯一能分开的地方
+        verify_log.record("verify_drag_inject", 2, force=args.force, blocker=blocker)
         return 2
 
     tmp = Path(tempfile.mkdtemp(prefix="xiaocc-inject-"))
@@ -171,6 +196,7 @@ def main() -> int:
                 break
         if not info.get("window_number"):
             print("子进程没起来（probe 里没有 window_number）")
+            verify_log.record("verify_drag_inject", 2, force=args.force, blocker=blocker)
             return 2
         number = int(info["window_number"])
         rect = window_rect(number)
@@ -189,6 +215,7 @@ def main() -> int:
                 break
         _check("前置：光标进热区后窗口接受鼠标事件", ready)
         if not ready:
+            verify_log.record("verify_drag_inject", 3, force=args.force, blocker=blocker)
             return 3
 
         cpu0 = cpu_seconds(child.pid)
@@ -272,11 +299,30 @@ def main() -> int:
         time.sleep(0.5)
         shutil.rmtree(tmp, ignore_errors=True)
 
+    # 判据数字（都是上面真量出来的，取不到的就不传）：等效更新频率、跟手残余、往返跳、CPU
+    criteria = {
+        "rate_per_s": round(rate, 1),
+        "p95_residual_px": round(p95_res, 1),
+        "mean_residual_px": round(mean_res, 1),
+        "max_residual_px": round(max_res, 1),
+        "max_step_px": round(max_step, 1),
+        "reversals_ge2px": rev_big,
+        "reversals_all": len(rev_pairs),
+        "opaque_pct": round(ratio * 100, 1),
+        "drag_cpu_pct": round(drag_cpu / wall * 100, 1),
+        "checks_failed": len(failures),
+    }
     print()
     if failures:
         print(f"结果：FAIL（{len(failures)} 项）—— " + "；".join(failures))
+        verify_log.record(
+            "verify_drag_inject", 1, criteria=criteria, force=args.force, blocker=blocker
+        )
         return 1
     print("结果：PASS（5/5）")
+    verify_log.record(
+        "verify_drag_inject", 0, criteria=criteria, force=args.force, blocker=blocker
+    )
     return 0
 
 

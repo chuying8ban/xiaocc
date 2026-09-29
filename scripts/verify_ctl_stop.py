@@ -36,6 +36,8 @@ import subprocess
 import time
 from pathlib import Path
 
+import verify_log
+
 REPO = Path(__file__).resolve().parents[1]
 DOMAIN = f"gui/{os.getuid()}"
 REAL_PET = "ai.hermes.xiaocc"
@@ -274,10 +276,13 @@ def main() -> int:
     )
 
     print()
+    criteria = {"passed": len(checks) - len(failures), "checks": len(checks)}
     if failures:
         print(f"结果：FAIL（{len(failures)} 项）—— " + "；".join(failures))
+        verify_log.record("verify_ctl_stop", 1, criteria=criteria)
         return 1
     print(f"结果：PASS（{len(checks)}/{len(checks)}）")
+    verify_log.record("verify_ctl_stop", 0, criteria=criteria)
     return 0
 
 

@@ -16,6 +16,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import verify_log
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
@@ -57,6 +59,7 @@ def click_quit(_t=None) -> None:
     if view is None:
         print("FAIL：没找到 webview")
         sys.stdout.flush()
+        verify_log.record("verify_panel_quit", 1)
         os._exit(1)
     # 两下：第一下进待确认，第二下真发（页面自己的规矩）
     view.evaluateJavaScript_completionHandler_(
@@ -68,6 +71,7 @@ def click_quit(_t=None) -> None:
 def still_alive(_t=None) -> None:
     print("FAIL：6 秒后面板进程还活着 —— 没有自己收窗（孤窗）")
     sys.stdout.flush()
+    verify_log.record("verify_panel_quit", 1, criteria={"deadline_s": 6.0, "still_alive": True})
     os._exit(1)
 
 
@@ -81,3 +85,5 @@ open_panel(
     out_path=SANDBOX / "panel.html",
     request_path=SANDBOX / "panel_request.json",
 )
+# open_panel 自己回来了 = 面板**自己收窗退出**了（这一支的绿）；上面两个 os._exit 是红。
+verify_log.record("verify_panel_quit", 0, criteria={"deadline_s": 6.0, "still_alive": False})

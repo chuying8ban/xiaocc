@@ -19,6 +19,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import verify_log
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
@@ -62,6 +64,11 @@ def main() -> int:
         print(f"1.4s 后的气泡   = {later!r}")
         ok = "采集中" in first and "%" in later and "采集中" not in later
         print(f"\n结果：{'PASS' if ok else 'FAIL'}")
+        verify_log.record(
+            "verify_bubble_pending",
+            0 if ok else 1,
+            criteria={"cpu_window_remaining_s": round(remaining, 2)},
+        )
         return 0 if ok else 1
     finally:
         backend.close()

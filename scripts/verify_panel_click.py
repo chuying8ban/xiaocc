@@ -30,6 +30,8 @@ import sys
 import tempfile
 from pathlib import Path
 
+import verify_log
+
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO / "src"))
 
@@ -244,6 +246,11 @@ def main() -> int:
         print(f"\n结果：{'PASS' if not failed else 'FAIL'}（{len(RESULTS) - len(failed)}/{len(RESULTS)}）")
         print(f"沙箱 {SANDBOX}")
         sys.stdout.flush()
+        verify_log.record(
+            "verify_panel_click",
+            1 if failed else 0,
+            criteria={"passed": len(RESULTS) - len(failed), "checks": len(RESULTS)},
+        )
         os._exit(1 if failed else 0)
 
     def step7(_t=None) -> None:
@@ -265,7 +272,15 @@ def main() -> int:
         out_path=SANDBOX / "panel.html",
         request_path=SANDBOX / "panel_request.json",
     )
-    return 0 if all(ok for _, ok, _ in RESULTS) else 1
+    # 走到这里说明 open_panel 自己回来了（面板被关掉之类）⇒ step10 那次 os._exit 没发生，
+    # 这一趟也得留痕，否则盘上留着的是**上一次**的绿。checks=0 的绿一眼就能认出来。
+    rc = 0 if all(ok for _, ok, _ in RESULTS) else 1
+    verify_log.record(
+        "verify_panel_click",
+        rc,
+        criteria={"passed": sum(1 for _, ok, _ in RESULTS if ok), "checks": len(RESULTS)},
+    )
+    return rc
 
 
 if __name__ == "__main__":

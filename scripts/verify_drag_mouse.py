@@ -33,6 +33,8 @@ from collections import namedtuple
 from itertools import pairwise
 from pathlib import Path
 
+import verify_log
+
 _CocoaPoint = namedtuple("_CocoaPoint", "x y")
 
 REPO = Path(__file__).resolve().parents[1]
@@ -691,10 +693,13 @@ def main() -> int:
         cursor[0] = wl.Point(-1000.0, -1000.0)
 
     print()
+    criteria = {"passed": len(checks) - len(failures), "checks": len(checks)}
     if failures:
         print(f"结果：FAIL（{len(failures)} 项）—— " + "；".join(failures))
+        verify_log.record("verify_drag_mouse", 1, criteria=criteria)
         return 1
     print(f"结果：PASS（{len(checks)}/{len(checks)}）")
+    verify_log.record("verify_drag_mouse", 0, criteria=criteria)
     return 0
 
 

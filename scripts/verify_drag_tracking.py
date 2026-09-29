@@ -17,6 +17,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
+import verify_log
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from xiaocc.backends import window_layout as wl
@@ -224,8 +226,15 @@ def main() -> int:
     coordinate_round_trip()
     if "--real" not in sys.argv:
         print("\n（真窗口部分要加 --real）")
-        return 1 if failures else 0
-    return real()
+        rc = 1 if failures else 0
+    else:
+        rc = real()
+    verify_log.record(
+        "verify_drag_tracking",
+        rc,
+        criteria={"failures": len(failures), "real": "--real" in sys.argv},
+    )
+    return rc
 
 
 if __name__ == "__main__":
