@@ -194,10 +194,36 @@ def open_panel(
                 self._save_settings(body)
             elif action == "close":
                 self._close()
+            elif action == "control":
+                self._control_(str(body.get("cmd") or ""))
             elif action == "open":
                 url = str(body.get("url") or "")
                 if url.startswith(("http://", "https://")):
                     AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(url))
+
+        def _control_(self, cmd: str) -> None:
+            # 名字**必须带尾下划线**：pyobjc 把 NSObject 子类的每个方法都当 ObjC 选择器，
+            # `_control(self, cmd)`（无尾下划线）会被当成 0 参数选择器 ⇒ 调用即
+            # `BadPrototypeError`，实测把整块面板打崩（消息桥那一条也一起没了）。
+            """面板里的「重启小cc / 退出小cc」（用户 2026-09-29）。
+
+            面板是**独立进程**，桌宠被 bootout 不会带走它 ⇒ 「退出」成功后自己也要收窗
+            （否则屏幕上留一个「桌宠未运行」的孤窗，看起来像没退干净）。dry-run 是门禁用的，
+            只记账不动手，所以那时也不收窗。
+            """
+            from .. import control
+
+            if cmd not in control.ACTIONS:
+                log.warning("控制：不认识的命令 %r", cmd)
+                return
+            ok, detail = control.perform(cmd)
+            log.info("面板：%s ⇒ %s（%s）", cmd, "成功" if ok else "失败", detail)
+            if ok and cmd == "quit" and not control.dry_run():
+                # 给页面 0.6s 把「已发出」写出来，再收窗（用 lambda 收进 self：类体里的名字
+                # 在方法里**不是**闭包变量，直接引 `_quit_self` 会 NameError）
+                AppKit.NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
+                    0.6, False, lambda _t: self._close()
+                )
 
         def _save_settings(self, body: dict) -> None:
             updates = {k: body[k] for k in ("click_action",) if k in body}
@@ -212,10 +238,28 @@ def open_panel(
             self._close()
 
         def tick_(self, _timer):
-            """每 0.5s：桌宠那侧有没有新请求（点了桌宠）？有就刷新 + 抬到前面。"""
+            """每 0.5s：桌宠那侧有没有新请求？有就按请求里写的动作办。
+
+            动作：``close`` = 桌宠要退出/重启了，面板一起收（**否则用户点了「退出小cc」会留个孤窗**）；
+            其余（含老格式只有 ``at`` 的）= 刷新 + 抬到前面。
+            """
             if self._request_is_new():
+                if self._request_action() == "close":
+                    log.info("收到收窗请求（桌宠退出/重启）⇒ 面板跟着收")
+                    self._close()
+                    return
                 self._reload()
                 self._raise()
+
+        def _request_action(self) -> str:
+            """请求文件里的动作词。读不到/没有这个键 ⇒ ``open``（老格式等价语义）。"""
+            try:
+                payload = json.loads(request_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return "open"
+            if not isinstance(payload, dict):
+                return "open"
+            return str(payload.get("action") or "open")
 
         # —— 内部 —
         def _seen_request(self) -> float:

@@ -46,6 +46,8 @@ def _build_parser() -> argparse.ArgumentParser:
     sub.add_parser("backends", help="列出可用显示层")
     sub.add_parser("where", help="打印关键路径")
     sub.add_parser("probe", help="读显示层的自证据：面板是不是「省电且没被节流」")
+    sub.add_parser("restart", help="重启小cc（走 ops/xiaoccctl：bootout + bootstrap）")
+    sub.add_parser("quit", help="退出小cc（走 ops/xiaoccctl stop：**只有 bootout 才停得住**）")
 
     run = sub.add_parser("run", help="启动小cc")
     run.add_argument(
@@ -418,6 +420,13 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_where()
     if args.command == "probe":
         return _cmd_probe()
+    if args.command in ("restart", "quit"):
+        from . import control
+
+        ok, detail = control.perform(args.command)
+        verb = "重启" if args.command == "restart" else "退出"
+        print(f"{verb}小cc：{'成功' if ok else '失败'}（{detail}）")
+        return 0 if ok else 1
     if args.command == "character":
         if args.char_command == "validate":
             return _cmd_character(args.path)

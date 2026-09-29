@@ -325,6 +325,12 @@ class _MenuTarget(NSObject):
     def openPanel_(self, _sender):
         self._backend._open_panel()
 
+    def restartPet_(self, _sender):
+        self._backend._restart_pet()
+
+    def quitPet_(self, _sender):
+        self._backend._quit_pet()
+
     def noop_(self, _sender):
         """设备状态那几行挂着它：**要 enabled 才是正常黑字**（disabled 会灰掉，像坏了），
         点了什么也不做，只把菜单收起来。"""
@@ -1487,6 +1493,14 @@ class AppKitBackend(Backend):
         item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_("打开控制面板", b"openPanel:", "")
         item.setTarget_(self._menu_target)
         menu.addItem_(item)
+        # 用户 2026-09-29 要求：菜单里要能**退出**和**重启**。
+        # 用词写全名（「重启小cc」不是「重启」）：菜单是两步操作（开菜单 + 点），不再加二次确认，
+        # 但名字必须让人一眼知道动的是谁。
+        menu.addItem_(NSMenuItem.separatorItem())
+        for title, selector in (("重启小cc", b"restartPet:"), ("退出小cc", b"quitPet:")):
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
+            item.setTarget_(self._menu_target)
+            menu.addItem_(item)
         return menu
 
     def _device_rows(self) -> list[tuple[str, str]]:
@@ -1500,6 +1514,38 @@ class AppKitBackend(Backend):
         except Exception:  # 采不到也不许把右键菜单带走
             log.exception("设备状态采样失败")
             return [("设备状态", "未取到")]
+
+    def _restart_pet(self) -> None:
+        """重启小cc（右键菜单）：派一个独立会话去跑 ``xiaoccctl restart``。
+
+        为什么**不自己先退**：那脚本会 ``bootout`` 掉我们这个作业（我们收 SIGTERM），走 cli 的收尾
+        比"先自己 os._exit"干净；脚本在新会话里，我们死了它也照跑。
+        """
+        self._control_pet("restart")
+
+    def _quit_pet(self) -> None:
+        """退出小cc（右键菜单）：先请面板收窗，再派 ``xiaoccctl stop`` 把作业 bootout 掉。
+
+        面板是**独立进程**（桌宠只是写请求文件拉它起来），我们不在了它也不会自己走 ⇒ 一起收。
+        """
+        try:
+            from ..panel.paths import request_close
+
+            request_close()
+        except Exception as exc:  # noqa: BLE001 - 面板收不收得了不该挡住「退出」本身
+            log.debug("请面板收窗失败（不影响退出）：%s", exc)
+        self._control_pet("quit")
+
+    def _control_pet(self, action: str) -> None:
+        """退出/重启的公共入口（失败只记日志 —— 菜单点一下不该把桌宠带崩）。"""
+        try:
+            from .. import control
+
+            ok, detail = control.perform_detached(action)
+        except Exception as exc:  # noqa: BLE001
+            log.warning("控制：%s 失败：%s", action, exc)
+            return
+        log.info("菜单：%s ⇒ %s（%s）", action, "已派出" if ok else "派不出去", detail)
 
     def _open_panel(self) -> None:
         """打开控制面板；已经开着就刷新并抬到前面。

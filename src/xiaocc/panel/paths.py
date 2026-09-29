@@ -126,6 +126,29 @@ def release_spawn_lock() -> None:
         pass
 
 
+def request_close() -> str:
+    """请求「面板收窗」（桌宠要退出/重启了，用户 2026-09-29 要求有退出功能）。
+
+    与 :func:`request_open` 的两处不同，都是有意的：
+
+    * **不拉进程**：没有任何面板在跑时什么都不做（不能为了"关"去起一个）；
+    * 只写 ``action: close``：面板那边认的是**文件 mtime 变新**，动作读自内容 ⇒ 老的
+      ``request.json``（只有 ``at``/``theme``）进来仍然等于「打开/抬前台」，行为不变。
+    """
+    if running_panel() is None:
+        return "absent"
+    try:
+        PANEL_REQUEST.parent.mkdir(parents=True, exist_ok=True)
+        PANEL_REQUEST.write_text(
+            json.dumps({"action": "close", "at": time.time()}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        os.chmod(PANEL_REQUEST, 0o600)
+    except OSError:
+        return "failed"
+    return "written"
+
+
 def request_open(*, theme: str | None = None, spawn: bool = True) -> str:
     """请求「把面板打开/抬到前面」。
 

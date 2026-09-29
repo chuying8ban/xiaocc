@@ -50,6 +50,12 @@ os.environ["XIAOCC_PANEL_STATE"] = str(_TMP / "panel.json")
 # 新增的三个交互要读设置、要读额度条 —— 同样不许碰用户真实的那两份文件
 os.environ["XIAOCC_SETTINGS_FILE"] = str(_TMP / "settings.json")
 os.environ["XIAOCC_QUOTA_FILE"] = str(_TMP / "quota.json")
+# 菜单里的「退出/重启」：**替身脚本 + 留痕文件** —— 回归脚本绝不许去 bootout 真作业
+# （那条会把用户屏上的桌宠真停掉）。留痕里留着派出去的命令行，判据断言的就是它。
+_CTL_STUB = _TMP / "ctl-stub.sh"
+_CTL_STUB.write_text("#!/bin/zsh\nexit 0\n", encoding="utf-8")
+os.environ["XIAOCC_CTL_OVERRIDE"] = str(_CTL_STUB)
+os.environ["XIAOCC_CTL_MARK"] = str(_TMP / "ctl.mark")
 
 import Quartz
 
@@ -424,10 +430,13 @@ def check_click_gestures(backend, number: int, cursor: list) -> None:
     )
     menu = backend._build_menu()
     titles = [str(menu.itemAtIndex_(i).title()) for i in range(menu.numberOfItems())]
-    device_rows = [t for t in titles if t != "" and t != "打开控制面板"]
+    #: 菜单里的**动作条目**（按顺序）—— 设备行只许排在它们前面（用户 2026-09-29 加了退出/重启）
+    actions = ("打开控制面板", "重启小cc", "退出小cc")
+    device_rows = [t for t in titles if t != "" and t not in actions]
     _check(
-        "⑯右键菜单：**上面是设备状态**（CPU/内存/磁盘…），最后一条才是「打开控制面板」",
-        titles[-1] == "打开控制面板"
+        "⑯右键菜单：**上面是设备状态**（CPU/内存/磁盘…），下面依次是「打开控制面板」「重启小cc」「退出小cc」",
+        [t for t in titles if t in actions] == list(actions)
+        and titles.index("打开控制面板") > titles.index("")  # 设备行全在动作之前
         and any(t.startswith("CPU") for t in titles)
         and any(t.startswith("内存") for t in titles)
         and any(t.startswith("磁盘") for t in titles),
@@ -441,6 +450,27 @@ def check_click_gestures(backend, number: int, cursor: list) -> None:
     backend._open_panel()
     backend.linger(0.05)
     _check("⑰菜单「打开控制面板」⇒ 请求到面板", req.exists(), f"{req.name} exists={req.exists()}")
+
+    # —— ⑱ 菜单里那两条控制项：**点了真到控制入口**（沙箱替身脚本，绝不碰真 launchd 作业）——
+    # 桌宠侧走 perform_detached（它自己就是被停的那个进程），所以这里断言的是「派出去的命令行」。
+    ctl_mark = Path(os.environ["XIAOCC_CTL_MARK"])
+    ctl_mark.write_text("", encoding="utf-8")
+    backend._control_pet("restart")
+    lines = ctl_mark.read_text(encoding="utf-8").strip().splitlines()
+    _check(
+        "㉗菜单「重启小cc」⇒ 真到控制入口（走替身脚本，留痕里是那命令行）",
+        len(lines) == 1
+        and " restart " in lines[0]
+        and lines[0].rstrip().endswith("restart [detached]"),
+        f"留痕={lines}",
+    )
+    backend._quit_pet()
+    lines = ctl_mark.read_text(encoding="utf-8").strip().splitlines()
+    _check(
+        "㉘菜单「退出小cc」⇒ 派出去的是 `xiaoccctl stop`（**只有 bootout 才停得住**，kill 会被 launchd 再拉起来）",
+        len(lines) == 2 and lines[1].rstrip().endswith("stop [detached]"),
+        f"留痕={lines}",
+    )
 
     # —— ⑱~㉑ 气泡：两行、每行放得下、5 秒、淡化（@researcher 那个「看不出错、只是没效果」的坑）——
     settings_store.save({"click_action": "badge"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))

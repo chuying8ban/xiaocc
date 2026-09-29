@@ -12,6 +12,8 @@
 
 判据（全部真窗口、真点击、真落盘）：
   ⓪设备卡：首帧那格「采集中」会**自己填成真数**（补帧落在 ~1.2s；不许停在「未取到」）
+  ⑨「退出小cc」第一下只进入待确认（不发送）、第二下才真到控制入口（留痕）
+  ⑩dry-run 下面板自己不收窗（门禁才能继续跑；真跑时会收）
   ①「设备状态」⇒ 沙箱 settings.json 的 click_action 变 device
   ② 页面上的选中态跟着走（.on 落在 device 上，不是只看文件）
   ③ 点回「额度」⇒ 变回 badge（双向都验，免得只对一次）
@@ -50,6 +52,11 @@ try:
 except OSError:
     QUOTA.write_text("{}")
 os.environ["XIAOCC_QUOTA_FILE"] = str(QUOTA)
+# 「退出/重启」那个门禁**只走 dry-run + 留痕**：这里验的是「页面上点两下 ⇒ 桥 ⇒ Python 控制入口」，
+# 绝不允许真把用户屏上的桌宠 bootout 掉（那样门禁自己会把它杀掉）。
+CTL_MARK = SANDBOX / "ctl.mark"
+os.environ["XIAOCC_CTL_DRY_RUN"] = "1"
+os.environ["XIAOCC_CTL_MARK"] = str(CTL_MARK)
 
 from AppKit import NSApp, NSTimer
 
@@ -201,6 +208,44 @@ def main() -> int:
         )
         NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.9, False, step7)
 
+    def step8(_t=None) -> None:
+        """「退出小cc」两下确认：「删除类/改变状态」的点按先弹确认（用户定的规矩）。"""
+        js(
+            "(() => { const b = document.getElementById('btn-quit'); b.click();"
+            " return b.textContent; })()",
+            sink,
+            "arm",
+        )
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.4, False, step9)
+
+    def step9(_t=None) -> None:
+        armed = str(sink.get("arm", (None, None))[0] or "")
+        check(
+            "⑨「退出小cc」第一下只进入待确认（不发送，3 秒自动撤回）",
+            armed == "再点一次确认" and not CTL_MARK.exists(),
+            f"按钮={armed} 留痕={CTL_MARK.exists()}",
+        )
+        js("document.getElementById('btn-quit').click(); 'ok'", sink, "fire")
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.6, False, step10)
+
+    def step10(_t=None) -> None:
+        mark = CTL_MARK.read_text(encoding="utf-8") if CTL_MARK.exists() else ""
+        check(
+            "⑩第二下才真到控制入口（dry-run 留痕：xiaoccctl stop）",
+            "quit" in mark and "xiaoccctl" in mark and " stop" in mark,
+            f"留痕={mark.strip()[:70]}",
+        )
+        check(
+            "⑪dry-run 下面板自己不收窗（门禁继续；真跑时退出会收）",
+            panel_web()[1] is not None,
+            f"webview={panel_web()[1] is not None}",
+        )
+        failed = [name for name, ok, _ in RESULTS if not ok]
+        print(f"\n结果：{'PASS' if not failed else 'FAIL'}（{len(RESULTS) - len(failed)}/{len(RESULTS)}）")
+        print(f"沙箱 {SANDBOX}")
+        sys.stdout.flush()
+        os._exit(1 if failed else 0)
+
     def step7(_t=None) -> None:
         refresh_err = sink.get("refresh", (None, None))[1]
         theme_value = sink.get("theme", (None, None))[0]
@@ -209,12 +254,7 @@ def main() -> int:
             refresh_err is None and theme_value in ("night", "paper"),
             f"刷新错误={refresh_err} 主题={theme_value}",
         )
-        failed = [name for name, ok, _ in RESULTS if not ok]
-        print(f"\n结果：{'PASS' if not failed else 'FAIL'}（{len(RESULTS) - len(failed)}/{len(RESULTS)}）")
-        print(f"沙箱 {SANDBOX}")
-        # 必须 os._exit：NSApp.terminate_ 直接结束进程、退出码恒 0 —— 门禁得能红
-        sys.stdout.flush()
-        os._exit(1 if failed else 0)
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.2, False, step8)
 
     # 2.6s 才开跑：补帧（~1.2s）已经落地、页面不再重渲染，后面的点击判据不会跟它抢
     NSTimer.scheduledTimerWithTimeInterval_repeats_block_(2.6, False, step0)

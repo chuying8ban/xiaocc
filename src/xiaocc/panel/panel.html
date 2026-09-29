@@ -60,6 +60,17 @@ __XIAOCC_STYLE__</style>
     <p class="note" id="set-note"></p>
   </section>
 
+  <section>
+    <div class="label">小cc 自己 <span class="tag">退出 / 重启</span></div>
+    <div class="seg">
+      <button id="btn-restart">重启小cc</button>
+      <button id="btn-quit">退出小cc</button>
+    </div>
+    <p class="note">重启 = 关掉再拉起（约 1 秒，位置不变）；退出 = 整个停掉，下次开机或手动再起。
+    两个按钮都要**点两下**：第一下只是等确认，3 秒不点自动撤回。</p>
+    <p class="note" id="ctl-note"></p>
+  </section>
+
   <footer>
     <span id="foot-left"></span><span class="spacer"></span><span id="foot-right"></span>
   </footer>
@@ -210,6 +221,29 @@ function post(action, extra){
   else { document.getElementById('foot-left').textContent = '浏览器里打开：' + action + ' 需要小cc 的窗口宿主'; }
   return msg;
 }
+
+// —— 小cc 自己：重启 / 退出。**两下确认**（第一下只进入待确认，3 秒自动撤回）——
+// 这两个动作不是撤销类（退出 = 桌宠整个停掉），所以按「改变状态的点按要先确认」那条规矩来，
+// 但确认就长在按钮上，不弹对话框。
+let ctlArmed = null, ctlTimer = null;
+function ctlNote(text){ document.getElementById('ctl-note').textContent = text; }
+function ctlArmReset(){
+  ctlArmed = null; clearTimeout(ctlTimer);
+  [['btn-restart','重启小cc'],['btn-quit','退出小cc']].forEach(([id,label]) => {
+    const b = document.getElementById(id); b.classList.remove('on'); b.textContent = label;
+  });
+}
+function ctlAsk(cmd){
+  const label = cmd === 'quit' ? '退出小cc' : '重启小cc';
+  const btn = document.getElementById(cmd === 'quit' ? 'btn-quit' : 'btn-restart');
+  if(ctlArmed === cmd){ ctlArmReset(); post('control', {cmd:cmd}); ctlNote('已发出：' + label); return; }
+  ctlArmReset();
+  ctlArmed = cmd; btn.classList.add('on'); btn.textContent = '再点一次确认';
+  ctlNote('再点一次就' + label + '（3 秒内）');
+  ctlTimer = setTimeout(ctlArmReset, 3000);
+}
+document.getElementById('btn-restart').addEventListener('click', () => ctlAsk('restart'));
+document.getElementById('btn-quit').addEventListener('click', () => ctlAsk('quit'));
 
 document.getElementById('btn-refresh').addEventListener('click', () => post('refresh'));
 document.getElementById('btn-close').addEventListener('click', () => post('close'));
