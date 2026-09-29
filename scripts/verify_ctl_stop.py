@@ -240,6 +240,13 @@ def main() -> int:
     assert SANDBOX.name == "xiaocc_ctlstop_sandbox", f"沙箱目录名字不对：{SANDBOX}"
 
     print(f"-- 开始前的 PreventUserIdleSystemSleep 持有者：{len(assertion_holders())} 个 --")
+    # overrides 库（`print-disabled`）快照：**只有 `launchctl enable/disable` 会往里写记录**，
+    # 而这条库**没有"取消"动词**（`launchctl` 只有 enable/disable/print-disabled，库文件
+    # /var/db/com.apple.xpc.launchd/disabled.<uid>.plist 归 root，非 root 改不了）
+    # ⇒ 谁要是在回归里手滑调一次 enable/disable 留个可抛标签的记录，就永久留在系统里。
+    # 所以这支笔自己**只读**它，并断言前后逐字不变（顺带也是"别把判据放宽成前缀/子串"的护栏：
+    # 库里本来就可能躺着别人留下的 `ai.hermes.probe.*` 之类记录，前缀匹配会被咬）。
+    dis_before = disabled_labels()
     try:
         path_a_real_stop()
         path_b_primitives()
@@ -253,6 +260,13 @@ def main() -> int:
     print("-- ⑤ 收尾 --")
     _check("⑤跑完无残留：可抛作业都不在", not loaded(PET) and not loaded(GUARD))
     _check("⑤跑完无残留：沙箱目录已删", not SANDBOX.exists(), str(SANDBOX))
+    dis_after = disabled_labels()
+    added = sorted(set(re.findall(r'"([^"]+)" =>', dis_after)) - set(re.findall(r'"([^"]+)" =>', dis_before)))
+    _check(
+        "⑤回归**没往 overrides 库写任何记录**（print-disabled 前后逐字不变）",
+        dis_after == dis_before,
+        f"新增记录={added}" if added else "逐字一致",
+    )
     _check(
         "⑤真作业仍在（回归没碰到它）",
         loaded(REAL_PET) and loaded(REAL_GUARD),
