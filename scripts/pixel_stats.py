@@ -10,7 +10,7 @@ import sys
 from collections import Counter
 from pathlib import Path
 
-from AppKit import NSBitmapImageRep, NSData, NSImage
+from AppKit import NSBitmapImageRep, NSData
 
 
 def stats(path: Path) -> str:

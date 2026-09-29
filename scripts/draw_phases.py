@@ -18,10 +18,10 @@ sys.path.insert(0, str(ROOT / "src"))
 os.environ.setdefault("XIAOCC_ANCHOR_FILE", "/tmp/xiaocc_draw_phases_anchor.json")
 os.environ.setdefault("XIAOCC_PROBE_FILE", "/tmp/xiaocc_draw_phases_probe.json")
 
-from xiaocc import characters  # noqa: E402
-from xiaocc.backends import appkit as ak  # noqa: E402
-from xiaocc.engine import Render  # noqa: E402
-from xiaocc.protocol import State, StatusEvent  # noqa: E402
+from xiaocc import characters
+from xiaocc.backends import appkit as ak
+from xiaocc.engine import Render
+from xiaocc.protocol import State, StatusEvent
 
 WATCHED = ("_draw_rig", "_draw_face", "_draw_art", "_draw_caption", "_draw_handle", "_apply_pose")
 
@@ -61,7 +61,7 @@ def main() -> int:
 
     t0 = time.perf_counter()
     try:
-        backend._pump(seconds)  # noqa: SLF001 —— 直接跑主循环，量的是真实绘制成本
+        backend._pump(seconds)
     finally:
         backend.close()
     wall = time.perf_counter() - t0
