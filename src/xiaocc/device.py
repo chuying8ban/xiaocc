@@ -122,6 +122,8 @@ _VM_FIELDS = {
     "Pages speculative": "speculative",
     "Pages wired down": "wired",
     "Pages occupied by compressor": "compressed",
+    #: 活动监视器「内存已用」的主力项（老 macOS 的 vm_stat 没有这一行 ⇒ 由 used_bytes_from_vm 兜底）
+    "Anonymous pages": "anonymous",
 }
 _PAGE_RE = re.compile(r"^(.+?):\s+(\d+)\.?$", re.MULTILINE)
 
@@ -143,16 +145,27 @@ def parse_vm_stat(text: str) -> dict[str, int]:
 
 
 def used_bytes_from_vm(pages: dict[str, int]) -> int | None:
-    """已用内存 =（active + wired + compressed）× 页大小。
+    """已用内存 = （**匿名页** + 常驻页 + 压缩器页）× 页大小 —— 与活动监视器「内存已用」同口径。
 
-    macOS 的「已用」口径各家不同：活动监视器把 inactive 也算进「已用」。
-    这里采用**压缩器 + 活跃 + 常驻**——它跟活动监视器「内存压力」那块更贴，
-    差几十 MB 属正常，不假装精确。free/speculative 是干净的可用页，不计。
+    **2026-09-29 真机实测（24 GB / 16 KiB 页），三种口径在同一时刻差得不是"几十 MB"**：
+
+    ======================  =========  ==================================
+    口径                    读数       谁能对上
+    ======================  =========  ==================================
+    active+wired+压缩器      **13.8 GB**  （旧实现）谁也对不上
+    匿名+常驻+压缩器（本式）  **16.0 GB**  活动监视器「内存已用」
+    总内存−free−speculative  **20.4 GB**  `top` 的 ``PhysMem used``
+    ======================  =========  ==================================
+
+    用户会在活动监视器里对同一个数，所以取中间那个口径；旧实现少报约 2.3 GB（相对 15%）——
+    在 24 GB 机器上就是「面板说 60%、活动监视器说 68%」，属于"看着合理其实错了"的那类假数。
+    `匿名页` 缺失（更老的 macOS）时才退回 active 口径，宁可口径偏移也别整格显示「未取到」。
     """
     if not pages:
         return None
     page = pages.get("page_size", 4096)
-    used = pages.get("active", 0) + pages.get("wired", 0) + pages.get("compressed", 0)
+    key = "anonymous" if pages.get("anonymous") else "active"
+    used = pages.get(key, 0) + pages.get("wired", 0) + pages.get("compressed", 0)
     return used * page
 
 

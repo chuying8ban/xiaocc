@@ -28,6 +28,9 @@ Pages copy-on-write:                       107933056.
 Pages zero filled:                         590102439.
 Pages reactivated:                          10881963.
 Pages occupied by compressor:                 123456.
+Anonymous pages:                              520977.
+Pages stored in compressor:                   677936.
+Pages purgeable:                              16314.
 """
 
 PMSET_AC = """Now drawing from 'AC Power'
@@ -55,11 +58,24 @@ def test_vm_stat_real_sample() -> None:
     assert pages["compressed"] == 123456
 
 
-def test_used_bytes_counts_active_wired_compressor() -> None:
+def test_used_bytes_matches_activity_monitor_formula() -> None:
+    """已用内存取「匿名 + 常驻 + 压缩器」——活动监视器「内存已用」的口径。
+
+    2026-09-29 真机上三种口径同刻分别是 13.8 / 16.0 / 20.4 GB（旧实现是第一个），
+    所以这条不是"更精确一点"，是**换掉了少报 15% 的那个口径**：用户会拿活动监视器对。
+    """
     pages = parse_vm_stat(VM_STAT_REAL)
+    assert pages["anonymous"] == 520977
     used = used_bytes_from_vm(pages)
-    assert used is not None
-    assert used == (418052 + 207877 + 123456) * 16384
+    assert used == (520977 + 207877 + 123456) * 16384
+    old = (418052 + 207877 + 123456) * 16384  # 旧口径
+    assert used > old and (used - old) / old > 0.10  # 真机上差 15%：别退回去
+
+
+def test_used_bytes_falls_back_when_anonymous_missing() -> None:
+    """老 macOS 的 vm_stat 没有「匿名页」那一行 ⇒ 退回 active 口径，而不是整格「未取到」。"""
+    pages = {"page_size": 4096, "active": 100, "wired": 10, "compressed": 5}
+    assert used_bytes_from_vm(pages) == (100 + 10 + 5) * 4096
 
 
 def test_used_bytes_empty_is_none_not_zero() -> None:
