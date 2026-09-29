@@ -407,7 +407,22 @@ class Sampler:
         #: 隔 3 秒再问、TTL 只有 2 秒，返回的还是**同一个快照对象**）。两个时钟不许混用。
         self._cache_at = 0.0
 
-    def get(self, *, fresh: bool = False) -> Device:
+    def window_age(self) -> float:
+        """距上次基线（上次采样）过了多久 —— 就是算 CPU 用的那个窗口。"""
+        return time.monotonic() - self._prev_at
+
+    def wait_remaining(self) -> float:
+        """还要等多久才算得出 CPU（0 = 现在就行）。首帧派去决定「多久后回来填数」。"""
+        return max(0.0, _MIN_CPU_WINDOW_S - self.window_age())
+
+    def get(self, *, fresh: bool = False, wait: bool = True) -> Device:
+        """采一次。``wait=False`` 给**首帧**用：绝不阻塞，算不出 CPU 就让它空着。
+
+        为什么要有这个开关（2026-09-29 @researcher 量出来）：CPU 窗口从 0.5s 抬到 1.0s 之后，
+        构造后 1 秒内算不出 CPU；而那次补等发生在面板**窗口已上屏、页面还没灌**之间 ——
+        用户看到的是空窗口挂 0.5~1.0s（而且每次打开面板都付，不是一次性）。所以首帧不等
+        （那一格写「采集中…」），等基线够了再重渲染一次把真数填进来。
+        """
         now = time.monotonic()
         if not fresh and self._cache is not None and now - self._cache_at < self._ttl:
             return self._cache
@@ -415,8 +430,12 @@ class Sampler:
         if window < _MIN_CPU_WINDOW_S:
             if self._cache is not None:  # 问得太挤：沿用上次的数
                 return self._cache
+            if not wait:
+                # 首帧：立刻返回。**这一份不进缓存** —— 缓存了它会在 TTL 里一直按「未取到」
+                # 把真数挡住（基线也不会往前走）。基线保留，窗口继续长。
+                return snapshot(None)
             # 还没出过 CPU 读数、窗口又太短（面板一打开就渲染、桌宠刚启动就右键）：
-            # **等够这半秒再采一次**（一次性），别让 CPU 那格永远是「未取到」。
+            # **等够再采一次**（一次性），别让 CPU 那格永远是「未取到」。
             time.sleep(_MIN_CPU_WINDOW_S - window)
             now = time.monotonic()
             window = now - self._prev_at

@@ -12,6 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
+#: 档位枚举与别名**只从 `settings` 引**（面板的 labels、桌宠的点击、CLI 都引同一份）：
+#: 在这里再抄一份就是第三处副本，加档时必漏一处（2026-09-29 @writer 数出来的那面墙）。
+#: 别名仍要认 `caption`：旧配置里的值、宽度笔都会拿它来量。
+from ..settings import CLICK_ACTION_ALIASES as _ACTION_ALIASES
+from ..settings import CLICK_ACTIONS as ACTIONS  # noqa: F401 - 转出去给宽度笔/CLI 用
+
 #: 单位 → 符号（认不出就用原单位，绝不猜）
 _SYMBOLS = {"CNY": "¥", "RMB": "¥", "USD": "$", "US$": "$"}
 
@@ -128,11 +134,6 @@ def _device_parts(device: Any) -> list[str]:
 def device_bubble_candidates(device: Any) -> list[list[str]]:
     """设备状态那两行（CPU/内存 在上、磁盘/电池 在下），按 @writer 量的每行 148px 排。"""
     return _pack_candidates(_device_parts(device))
-
-
-#: 旧枚举名 → 新枚举名：`settings.json` 里写着 `caption` 的机器不能因为换名字就回落默认
-_ACTION_ALIASES = {"caption": "device"}
-ACTIONS = ("badge", "device", "all", "none")
 
 
 def bubble_candidates(

@@ -33,7 +33,7 @@ from .paths import (
     REQUEST_POLL_S,
     release_spawn_lock,
 )
-from .render import build_payload, render_html, write_panel
+from .render import build_payload, device_wait_remaining, render_html, write_panel
 
 log = logging.getLogger("xiaocc.panel")
 
@@ -78,13 +78,14 @@ def open_panel(
     request_path = Path(request_path or PANEL_REQUEST)
     settings_path = Path(settings_path) if settings_path else settings_store.settings_path()
 
-    def render_page_now(theme_now: str) -> str:
+    def render_page_now(theme_now: str, *, device_wait: bool = True) -> str:
         html = render_html(
             build_payload(
                 quota_path=quota_path,
                 probe_path=probe_path,
                 theme=theme_now,
                 settings_path=settings_path,
+                device_wait=device_wait,
             )
         )
         try:
@@ -121,8 +122,13 @@ def open_panel(
             self._seen_request()
             return self
 
-        def render_now(self) -> str:
-            return render_page_now(self._theme)
+        def render_now(self, *, device_wait: bool = True) -> str:
+            return render_page_now(self._theme, device_wait=device_wait)
+
+        def fillDevice_(self, _timer) -> None:
+            """设备那格来补数：重渲染一次页面（此时基线够了，``get()`` 不会再阻塞）。"""
+            if self._web is not None:
+                self._web.loadHTMLString_baseURL_(self.render_now(), None)
 
         # —— 页面 → 宿主 —
         def webView_didFinishNavigation_(self, webview, _navigation):
@@ -327,7 +333,14 @@ def open_panel(
             self._write_state()
             # 先把窗口摆上屏再灌页面：页面渲染失败也别让窗口"根本没出现"
             window.orderFrontRegardless()
-            web.loadHTMLString_baseURL_(self.render_now(), None)
+            # 首帧**不等设备采样**（CPU 要 1s 的 tick 窗口，在这儿等就是空窗口挂一秒、
+            # 而且每次打开面板都要再付一次）。那一格先写「采集中…」，基线够了再渲染一遍填真数。
+            web.loadHTMLString_baseURL_(self.render_now(device_wait=False), None)
+            fill_delay = device_wait_remaining()
+            if fill_delay > 0:
+                AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
+                    fill_delay + 0.2, self, "fillDevice:", None, False
+                )
 
             AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 REQUEST_POLL_S, self, "tick:", None, True

@@ -164,7 +164,9 @@ function render(){
     ['贴边', p.dock], ['锚点', p.anchor_state + (p.anchor_ok?' ✓':' ✗')],
     ['圈速', (p.pump_loops_per_sec||0)+'/s'], ['画帧', (p.paints_per_sec||0)+'/s'],
     ['状态已持续', ago(p.state_changed_ago_s)],
-    ['单击', {badge:'弹额度气泡', caption:'弹状态气泡', none:'不显示'}[p.click_action] || (p.click_action||'—')],
+    // 中文名**只从 payload 的 labels 来**（`settings.CLICK_ACTION_LABELS` 一处）：页面再写一份
+    // 映射，加档时必漏，把内部 token 原样印给用户（2026-09-29 真机上印出过「单击 all」）。
+    ['单击', ((DATA.settings||{}).labels||{})[p.click_action] || '—'],
     ['气泡', p.badge_drawn ? (p.badge_drawn + (p.badge_alpha!=null && p.badge_alpha<1 ? '（淡化 '+p.badge_alpha+'）' : '')) : '没在显示'],
     ['进程', p.pid]
   ];
@@ -175,7 +177,8 @@ function render(){
 
   // 设置（就和面板同一页 —— 用户明确要求「设置和控制面板是同一个东西」）
   const D = DATA.device || {rows: []};
-  document.getElementById('tag-dev').textContent = (D.rows && D.rows.length) ? '现采' : '未取到';
+  document.getElementById('tag-dev').textContent = D.pending ? '采集中'
+    : ((D.rows && D.rows.length) ? '现采' : '未取到');
   document.getElementById('dev').innerHTML = (D.rows && D.rows.length)
     ? D.rows.map(r => '<div>'+esc(r[0])+' <b>'+esc(r[1])+'</b></div>').join('')
     : '<div><b>未取到</b></div>';
@@ -184,7 +187,7 @@ function render(){
   const labels = S.labels || {};
   const cur = S.click_action || 'badge';
   document.getElementById('tag-set').textContent = S.path ? S.path.split('/').pop() : 'settings.json';
-  document.getElementById('click-actions').innerHTML = (S.actions||['badge','caption','none'])
+  document.getElementById('click-actions').innerHTML = (S.actions||Object.keys(labels))
     .map(a => '<button data-act="'+esc(a)+'" class="'+(a===cur?'on':'')+'">'+esc(labels[a]||a)+'</button>').join('');
   const prevLines = Array.isArray(S.bubble_preview) ? S.bubble_preview : [S.bubble_preview || ''];
   document.getElementById('bubble-preview').innerHTML = prevLines.length

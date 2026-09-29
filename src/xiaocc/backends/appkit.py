@@ -756,7 +756,7 @@ class AppKitBackend(Backend):
             "badge_alpha": round(self._badge_alpha(), 2),
             #: 真正画下去多少帧/秒（@researcher 那个零成本判定实验：一个数就能把两档 CPU 钉死）
             "paints_per_sec": self._paints_per_sec,
-            #: 单击小cc 时按设置做什么（badge / caption / none）—— 取自 settings.json
+            #: 单击小cc 时按设置做什么（badge / device / all / none）—— 取自 settings.json
             "click_action": self._click_action(),
             #: —— 状态新鲜度的自证据：doctor 从进程外判「画面是不是卡在某个状态不动」
             #: 就看这几行（典型病因：源把毫秒当秒写进 ``at``，事件于是永不过期）——
@@ -1314,8 +1314,9 @@ class AppKitBackend(Backend):
         这是**唯一**的破例入口（单击不挂起等双击，2026-09-29 用户定的语义）—— 所以这里必须
         「立刻就有东西出来」，不许先做别的再显示。
         """
-        raw = self._click_action()
-        action = settings_store.CLICK_ACTION_ALIASES.get(raw, raw)  # 旧名 caption == device
+        # 别名（旧名 caption ⇒ device）在 `settings` 的**读入规范化**里已经做掉了 ⇒ 这里拿到的
+        # 一定是新名，别再抄一份别名表（照抄一份就是第三处副本，加档时必漏）。
+        action = self._click_action()
         if action == "none":
             self._hide_badge()
             log.debug("单击：设置是「不显示」，什么都不做")
@@ -1721,7 +1722,7 @@ class AppKitBackend(Backend):
         return bubble_text_width_for(self._window_local.width)
 
     def _draw_badge(self, accent: str) -> None:
-        """单击小cc 时贴在角色下方的那枚**对话气泡**（额度 / 状态文案）。
+        """单击小cc 时贴在角色下方的那枚**对话气泡**（额度 / 设备状态 / 额度+设备）。
 
         **走自己的通道**：只写 ``badge_drawn``，一个字节都不碰 ``caption_drawn`` ——
         后者被 ``appkit_screenshots.py`` 的「待机时不挂文案」断言守着，拿它去挂气泡等于把一条

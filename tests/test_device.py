@@ -243,6 +243,21 @@ def test_frozen_counter_is_not_papered_over_by_a_blocking_retry(monkeypatch) -> 
     assert elapsed < device_mod._MIN_CPU_WINDOW_S + 0.4  # 只等了窗口，没有额外重试预算
 
 
+def test_sampler_without_wait_returns_at_once_and_does_not_poison_the_cache() -> None:
+    """首帧那条路（`wait=False`）：立刻返回、CPU 空着，而且**不许把这一份缓存起来**。
+
+    缓存了它就会在 TTL 里一直按「未取到」把真数挡住（基线也不会往前走）。等基线够了一次
+    `get()` 就得拿到 CPU —— 这就是面板「先写采集中、一秒后填真数」成立的前提。
+    """
+    from xiaocc.device import Sampler
+
+    sampler = Sampler()
+    quick = sampler.get(wait=False)
+    assert quick.cpu_percent is None
+    assert sampler.wait_remaining() > 0.0
+    assert sampler.get().cpu_percent is not None  # 基线够了，内部补等一次就有
+
+
 def test_sampler_caches_within_ttl() -> None:
     from xiaocc.device import Sampler
 

@@ -384,7 +384,9 @@ def check_click_gestures(backend, number: int, cursor: list) -> None:
         f"request={req.exists()} badge_drawn={probe.get('badge_drawn')!r}",
     )
 
-    # —— ⑬ 设置成「状态文案」⇒ 贴的是文案、不是余额；设成「不显示」⇒ 什么都不贴 ——
+    # —— ⑬ 旧枚举名 caption ⇒ 等价「设备状态」档（贴的是设备行，不是余额）——
+    # 用户 2026-09-29 把「状态文案」重定义成电脑状态：这条守的是**别名 + 设备档**，判词也得这么说，
+    # 否则它绿着、守的却不是它嘴上讲的那件事。
     settings_store.save({"click_action": "caption"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))
     backend._reload_settings(force=True)
     backend.render(Render(event=StatusEvent(source="demo", state=State.WORKING), character=load_character()))
@@ -393,8 +395,8 @@ def check_click_gestures(backend, number: int, cursor: list) -> None:
     backend.linger(0.06)
     drawn = str(backend.probe().get("badge_drawn") or "")
     _check(
-        "⑬设置=状态文案 ⇒ 贴文案（不是余额）",
-        bool(drawn) and "75.00" not in drawn,
+        "⑬旧名 caption ⇒ 等价设备档（贴的是设备行 CPU/内存，不是余额）",
+        bool(drawn) and "75.00" not in drawn and ("CPU" in drawn or "内存" in drawn),
         f"badge_drawn={drawn!r}",
     )
     settings_store.save({"click_action": "none"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))

@@ -620,6 +620,19 @@ def test_device_candidates_say_taken_failed_never_zero():
     assert "未取到" in flat and "0%" not in flat
 
 
+def test_action_enum_is_single_sourced_across_modules():
+    """档位枚举/别名**只有一份**（`settings`），`quota.badge` 是引过来的、不是抄一份。
+
+    照抄一份的代价：面板/桌宠/CLI 引不同的名字，加一档就得记得改好几处，漏一处就是
+    「用户选了却不生效」或「把内部 token 印出来」。用 ``is`` 断言同一对象，抄一份就红。
+    """
+    from xiaocc import settings as S
+    from xiaocc.quota import badge
+
+    assert badge.ACTIONS is S.CLICK_ACTIONS
+    assert badge._ACTION_ALIASES is S.CLICK_ACTION_ALIASES
+
+
 def test_bubble_candidates_dispatch_and_caption_alias():
     dev = FakeDevice()
     meta = {"exists": True, "age_s": 480, "stale": False}

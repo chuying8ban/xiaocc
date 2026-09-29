@@ -82,6 +82,28 @@ def test_陈锁会过期(sandbox, monkeypatch):
     assert len(calls) == 1
 
 
+def test_device_block_says_collecting_when_the_baseline_is_too_young() -> None:
+    """两种空必须分开写：**「等一秒就有」**（采集中…）不是「未取到」。
+
+    用户点开面板看到「未取到」会以为坏了；而这半秒的等待是我们自己的 CPU 采样窗口造成的。
+    """
+    from xiaocc.device import Device
+    from xiaocc.panel.render import _device_block
+
+    young = _device_block(
+        Device(taken_at=0.0, cpu_percent=None, mem_used=1, mem_total=2), wait_remaining=0.6
+    )
+    assert young["pending"] is True
+    assert dict(young["rows"])["CPU"] == "采集中…"
+
+    stale = _device_block(Device(taken_at=0.0, cpu_percent=None), wait_remaining=0.0)
+    assert stale["pending"] is False
+    assert dict(stale["rows"])["CPU"] == "未取到"
+
+    real = _device_block(Device(taken_at=0.0, cpu_percent=12.0), wait_remaining=0.6)
+    assert real["pending"] is False and dict(real["rows"])["CPU"].startswith("12%")
+
+
 def test_没有数据时不编数字(tmp_path):
     """quota.json 不存在（或坏掉）⇒ 页面必须写「还没有采集数据」，不许出现 ¥0.00。"""
     payload = render.build_payload(

@@ -63,19 +63,33 @@ PET_FIELDS = (
 _DEVICE_SAMPLER = device_mod.Sampler()
 
 
-def _device_snapshot() -> Any:
+def _device_snapshot(*, wait: bool = True) -> Any:
     """采一次设备状态（失败返回 ``None``）。设备卡与**气泡预览共用同一刻**的这份快照。"""
     try:
-        return _DEVICE_SAMPLER.get(fresh=True)
+        return _DEVICE_SAMPLER.get(fresh=True, wait=wait)
     except (OSError, ValueError):  # 页面渲染不许被设备采集带崩
         return None
 
 
-def _device_block(dev: Any) -> dict[str, Any]:
-    """设备状态（CPU / 内存 / 磁盘 / 电池 / 已开机）。**采不到就空着**，页面写「未取到」。"""
+def device_wait_remaining() -> float:
+    """设备那格还要等多久才有 CPU（0 = 现在就有）——面板用它决定多久后回来重渲染填数。"""
+    return _DEVICE_SAMPLER.wait_remaining()
+
+
+def _device_block(dev: Any, *, wait_remaining: float = 0.0) -> dict[str, Any]:
+    """设备状态（CPU / 内存 / 磁盘 / 电池 / 已开机）。**采不到就空着**，页面写「未取到」。
+
+    ``wait_remaining > 0`` 且 CPU 还是空的 ⇒ 那不是「未取到」而是「**还没到时候**」（基线太新）：
+    写「采集中…」并带上 ``pending``，宿主等一两秒重渲染一次填真数。两种空必须分开 ——
+    把「等一秒就有」写成「未取到」才是用户以为坏了的那种假数。
+    """
     if dev is None:
-        return {"rows": [], "sampled_at": None}
-    return {"rows": [[title, value] for title, value in dev.lines()], "sampled_at": dev.taken_at}
+        return {"rows": [], "sampled_at": None, "pending": False}
+    rows = [[title, value] for title, value in dev.lines()]
+    pending = dev.cpu_percent is None and wait_remaining > 0.0
+    if pending:
+        rows = [[title, "采集中…" if title == "CPU" else value] for title, value in rows]
+    return {"rows": rows, "sampled_at": dev.taken_at, "pending": pending}
 
 
 def _preview_lines(action: str, report: Any, meta: Any, device: Any) -> list[str]:
@@ -114,21 +128,26 @@ def build_payload(
     theme: str = "night",
     now_iso: str | None = None,
     settings_path: Path | None = None,
+    device_wait: bool = True,
 ) -> dict[str, Any]:
-    """组装页面数据。**取不到就是取不到** —— 这里不补 0、不编数。"""
+    """组装页面数据。**取不到就是取不到** —— 这里不补 0、不编数。
+
+    ``device_wait=False`` 给**首帧**：设备采样绝不在主线程等（等了就是空窗口挂一秒，见
+    :meth:`xiaocc.device.Sampler.get`），那一格先写「采集中…」，等基线够了再渲染一次。
+    """
     from .. import settings as settings_store
     from ..quota.base import now_iso as _now_iso
 
     report, meta = load_quota(Path(quota_path))
     described = settings_store.describe(settings_path)
-    dev = _device_snapshot()
-    action = str(described.get("click_action") or "badge")
+    dev = _device_snapshot(wait=device_wait)
+    action = str(described.get("click_action") or settings_store.DEFAULTS["click_action"])
     return {
         "theme": theme if theme in ("night", "paper") else "night",
         "rendered_at": now_iso or _now_iso(),
         "quota": {"meta": meta, "report": report or {}},
         "pet": _pet_snapshot(Path(probe_path)),
-        "device": _device_block(dev),
+        "device": _device_block(dev, wait_remaining=_DEVICE_SAMPLER.wait_remaining()),
         "settings": {
             "path": str(settings_path or settings_store.settings_path()),
             "schema": described.get("schema", 1),
