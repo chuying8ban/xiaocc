@@ -393,10 +393,12 @@ class AppKitBackend(Backend):
         self._last_paint_at = 0.0
         #: 拖拽兜底：鼠标键第一次读到「全松开」的时刻（见 ``_DRAG_BUTTON_UP_GRACE``）
         self._buttons_up_since: float | None = None
-        #: 这一次按下是不是「点击」（按下到松开没怎么动）—— 判定见 :meth:`_mouse_up`
+        #: 这次按下是不是「点击」（按下到松开没怎么动）—— 判定见 :meth:`_mouse_up`
         self._press_at: float | None = None
         self._press_point: wl.Point | None = None
         self._press_moved = False
+        #: 按下期间**最大**位移（px）：_TAP_SLOP 该定多少得看真实分布，不能拍脑袋
+        self._press_max_moved = 0.0
         #: 上一次点击的时刻（判双击用）与设置文件的重读时刻
         self._last_click_at = 0.0
         self._settings_checked_at = 0.0
@@ -1178,21 +1180,27 @@ class AppKitBackend(Backend):
         self._press_at = time.monotonic()
         self._press_point = point
         self._press_moved = False
+        self._press_max_moved = 0.0
 
     def _mouse_dragged(self, event: Any) -> None:
         if not self._dragging:
             return
         point = self._mouse_screen_point(event)
-        if self._press_point is not None and not self._press_moved:
-            far = abs(point.x - self._press_point.x) > _TAP_SLOP or abs(
-                point.y - self._press_point.y
-            ) > _TAP_SLOP
-            if far:
-                self._press_moved = True
+        if self._press_point is not None:
+            self._press_max_moved = max(
+                self._press_max_moved,
+                max(abs(point.x - self._press_point.x), abs(point.y - self._press_point.y)),
+            )
+            if not self._press_moved:
+                far = abs(point.x - self._press_point.x) > _TAP_SLOP or abs(
+                    point.y - self._press_point.y
+                ) > _TAP_SLOP
+                if far:
+                    self._press_moved = True
         self.move_window_to(point.x - self._drag_offset[0], point.y - self._drag_offset[1])
 
-    def _mouse_up(self, _event: Any) -> None:
-        """松手：先按拖拽收尾，再判这次是不是「点击」，是就按设置执行动作。
+    def _mouse_up(self, event: Any = None) -> None:
+        """松手：先判这次是不是「点击」，再决定要不要按拖拽收尾。
 
         三种手势的语义（2026-09-29 定，@researcher 的时序论证 + @ops 的三条风险都采纳）：
 
@@ -1210,20 +1218,31 @@ class AppKitBackend(Backend):
         now = time.monotonic()
         held_ms = None if self._press_at is None else (now - self._press_at) * 1000.0
         tap = (not self._press_moved) and held_ms is not None and held_ms / 1000.0 <= _TAP_MAX_HOLD_S
+        moved_px = self._press_max_moved
         self._press_at = None
         self._press_point = None
-        edge = self.end_drag()
-        log.debug("拖拽结束：%s", edge)
-        if not tap:
+        if tap:
+            # **点击不许改几何**（用户 2026-09-29 报的 bug：单击桌宠它会自己收回去）。
+            # 以前这里无条件走 end_drag() ⇒ dock.drop() ⇒ 桌宠本来就在边上，
+            # 「按下即松手」被判成「扔到边上」⇒ 立刻收成 12px 把手条，气泡还画在那条 12px 里
+            # （19:10:56 的日志就是这条链：expand → collapse → 点击 → 气泡 → expand）。
+            # 点击只收拖拽态：不 drop、不改锚点、不动窗口。按下那一下已经
+            # `_expand_from_edge()` 展开过了，所以收起态点一下也能看到完整的角色 + 气泡。
+            self._dragging = False
+            log.debug("点击：只收拖拽态（贴边状态保持 %s）", self._dock.state)
+        else:
+            edge = self.end_drag()
+            log.debug("拖拽结束：%s", edge)
             return
         interval = self._double_click_interval()
         double = (now - self._last_click_at) <= interval
         self._last_click_at = now
         action = "双击" if double else "单击"
         log.info(
-            "点击桌宠：%s held=%.0fms 双击间隔=%.0fms ⇒ %s",
+            "点击桌宠：%s held=%.0fms 位移=%.0fpx 双击间隔=%.0fms ⇒ %s",
             action,
             held_ms or 0.0,
+            moved_px,
             interval * 1000.0,
             "收起额度条+开面板" if double else f"按设置执行 click_action={self._click_action()!r}",
         )

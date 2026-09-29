@@ -294,7 +294,7 @@ def check_tap_opens_panel(backend, number: int) -> None:
 
 
 
-def check_click_gestures(backend, number: int) -> None:
+def check_click_gestures(backend, number: int, cursor: list) -> None:
     """⑨~㉑ 单击弹气泡 / 双击开面板 / 慢点不算点击 / 设置能换动作 / 右键不进拖拽 /
     菜单只剩一条 / 气泡两行且放得下 / 5 秒 + 淡化（淡化中指纹必须逐帧变）。
 
@@ -483,6 +483,72 @@ def check_click_gestures(backend, number: int) -> None:
         f"TTL={appkit._BADGE_TTL_S} 淡化={appkit._BADGE_FADE_S}",
     )
 
+    # —— ㉒~㉔ 单击不许把桌宠收回去（用户 19:10 报的真 bug）——
+    # 旧行为：`_mouse_up` 无条件 `end_drag()` ⇒ `dock.drop()` ⇒ 桌宠本来就在边上，
+    # 「按下即松手」被判成「扔到边上」⇒ 立刻收成 12px 把手条，气泡还画在那条 12px 里。
+    def click_here(hold: float = 0.04) -> None:
+        """在**当前**窗口中心点一下（`click()` 用的是函数入口那个 center，窗口挪了就不准）。"""
+        here = backend._window_local.center
+        backend._mouse_down(event_for(here, backend._window_local))
+        backend.linger(hold)
+        backend._mouse_up(None)
+        backend.linger(0.02)
+
+    space = backend._space()
+    anchor_file = Path(os.environ["XIAOCC_ANCHOR_FILE"])
+    body = backend._body_in_screen()
+    # ① 摆到右边缘**内侧一点点**（还在吸附距离内）—— 用户平时就是这么放的。
+    # 两个必须做的准备，否则判据测的不是点击：`reason="drag"`（别的理由会被防漂移守卫当场
+    # 回锚）+ 把它落成新家（否则下一秒的漂移自检照样回锚）+ 光标停在它身上（贴边靠悬停判定，
+    # 光标钉在屏外的话下一拍就把贴着边的窗口收起来了）。
+    near = wl.Rect(
+        space.screen.x + space.screen.width - body.width - backend.snap_distance * 0.5,
+        body.y,
+        body.width,
+        body.height,
+    )
+    backend._set_window_rect(near, reason="drag")
+    backend._save_anchor_from_window()
+    backend._dock.reset()  # 「用户把它摆到边上、还没松手贴边」的那一刻
+    cursor[0] = wl.Point(near.center.x, near.center.y)
+    backend.linger(0.25)
+    backend._hide_badge()
+    anchor_before = anchor_file.read_bytes() if anchor_file.exists() else b""
+    click_here()
+    backend.linger(0.25)
+    now_local = backend._window_local
+    _check(
+        "㉒桌宠停在屏幕边内侧时单击 ⇒ **不收成把手条**（宽度不变、没落边）",
+        abs(now_local.width - near.width) < 1.0 and backend._dock.state == "floating",
+        f"宽 {near.width:.0f}→{now_local.width:.0f} dock={backend._dock.state}",
+    )
+    anchor_after = anchor_file.read_bytes() if anchor_file.exists() else b""
+    _check(
+        "㉓单击也不许动锚点（点击不是搬家：不落边、不写锚点）",
+        anchor_before == anchor_after,
+        f"锚点文件 {'没动' if anchor_before == anchor_after else '被改了'}",
+    )
+    # ② 真的收成把手条（12px）时点一下 ⇒ 展开成完整角色 + 气泡在完整窗口里，且不回缩
+    backend._dock.edge = wl.Edge.RIGHT
+    backend._dock.docked = True
+    backend._dock.collapsed = True
+    backend._dock.armed = False
+    backend._set_window_rect(
+        wl.collapsed_rect(wl.Edge.RIGHT, space.screen, backend._body_in_screen()),
+        reason="collapse",
+    )
+    backend.linger(0.2)
+    strip_w = backend._window_local.width
+    backend._hide_badge()
+    click_here()
+    backend.linger(0.25)
+    expanded = backend._window_local.width
+    _check(
+        "㉔收起成把手条时单击 ⇒ 展开成完整角色 + 气泡（否则「单击显示额度」在最常见的状态下等于没做）",
+        strip_w < 40.0 and expanded > 100.0 and bool(backend._badge_lines),
+        f"把手条 {strip_w:.0f}px → 点击后 {expanded:.0f}px 气泡={backend._badge_lines}",
+    )
+
 
 
 def main() -> int:
@@ -533,7 +599,7 @@ def main() -> int:
         check_tap_opens_panel(backend, number)
         backend.render(Render(event=StatusEvent(source="demo", state=State.IDLE), character=character))
         backend.linger(0.2)
-        check_click_gestures(backend, number)
+        check_click_gestures(backend, number, cursor)
     finally:
         backend.close()
         cursor[0] = wl.Point(-1000.0, -1000.0)
