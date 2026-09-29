@@ -91,7 +91,12 @@ def classify(gate: str, rec: dict | None, now: float | None = None) -> tuple[str
         word = "陈旧（环境受限型，无硬过期）" if gate in ENV_LIMITED else "超期"
         return word, f"最后记录 {age_s}，rc={rc}"
     ok = "绿" if rc == 0 else ("红" if rc == 1 else f"rc={rc}")
-    return f"新鲜·{ok}", f"{age_s}，rc={rc}" + (f"，blocker={blocker}" if blocker else "")
+    # 证据必须自带"对着哪棵树跑的"：dirty=True 的绿是"对着未提交工作树跑的绿"，
+    # 谁把它当发布绿灯就是引用错了对象（下一批提交后要重跑才有"对着提交的绿"）。
+    tree = rec.get("rev") or "?"
+    if rec.get("dirty"):
+        tree += "+未提交"
+    return f"新鲜·{ok}", f"{age_s}，rc={rc}，树={tree}" + (f"，blocker={blocker}" if blocker else "")
 
 
 def main(argv: list[str] | None = None) -> int:

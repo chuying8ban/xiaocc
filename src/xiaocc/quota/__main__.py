@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import time
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,14 @@ from . import DEFAULT_QUOTA_PATH, load, refresh
 from .base import STATE_OK
 
 _MARK = {STATE_OK: "  ", "stale": "陈旧", "unknown": "未知", "error": "出错"}
+
+
+def _ts() -> str:
+    """launchd 把这支作业的 stdout 收进 `quota.out.log`，而那一行**原来没有时间戳** ⇒
+    「它跑没跑」只能靠 quota.json 的 mtime 反推（实测踩过：看到一段 40 分钟的空档，
+    却判不出是真没跑，还是 StartInterval + Background 的作业在锁屏/睡眠时被系统延后）。
+    每拍一行都带时间戳，这件事就不用猜了。"""
+    return time.strftime("%m-%d %H:%M:%S")
 
 
 def _fmt_items(service: dict[str, Any]) -> str:
@@ -76,9 +85,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "refresh":
         report, saved = refresh(args.file)
-        print(f"采集完成：{len(report['services'])} 个服务；写入 {args.file} = {saved}")
+        print(f"{_ts()} 采集完成：{len(report['services'])} 个服务；写入 {args.file} = {saved}")
         if not saved:
-            print("（写盘失败：额度文件写不进去不该影响桌宠，这里只报告）")
+            print(f"{_ts()} （写盘失败：额度文件写不进去不该影响桌宠，这里只报告）")
         return 0 if saved else 1
     return _show(args.file, args.json)
 
