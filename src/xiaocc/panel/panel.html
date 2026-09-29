@@ -20,7 +20,7 @@ __XIAOCC_STYLE__</style>
   </div>
 
   <section>
-    <div class="label">官方实时余额 <span class="tag" id="tag-svc"></span></div>
+    <div class="label">官方接口余额（15 分钟一拍）<span class="tag" id="tag-svc"></span></div>
     <div class="stale" id="stale"></div>
     <div class="hero">
       <div class="num" id="hero-num">—</div><div class="cur" id="hero-cur"></div>
@@ -34,7 +34,7 @@ __XIAOCC_STYLE__</style>
     <div class="label">本机账本 · 近 <span id="ledger-days">30</span> 天 <span class="tag">估价，非账单</span></div>
     <div class="seg">
       <button id="seg-default" class="on">默认 profile</button>
-      <button id="seg-all">全部 6 库</button>
+      <button id="seg-all">全部 profile</button>
     </div>
     <table><tbody id="ledger"></tbody></table>
     <p class="note" id="ledger-note"></p>
@@ -43,8 +43,8 @@ __XIAOCC_STYLE__</style>
   <section>
     <div class="label">桌宠现状 <span class="tag" id="tag-pet"></span></div>
     <div class="kv" id="pet"></div>
-    <p class="note">这一节直接读桌宠自己写的自证据（<code>probe.json</code>），不是猜的。面板里暂时只有「刷新」会写东西：
-    桌宠还能改的项（缩放/位置/语音…）要哪些你说，我再接，不摆点不动的开关。</p>
+    <p class="note">这一节直接读桌宠自己写的自证据（<code>probe.json</code>），不是猜的。面板本身只读，
+    只有「刷新」会去重取一次数据。</p>
   </section>
 
   <footer>
@@ -92,7 +92,7 @@ function render(){
       .map(i => esc(i.label)+' <b>'+esc(money(i.value))+'</b>').join('<br>') || '<span class="none">只有总额</span>';
   } else {
     document.getElementById('hero-num').textContent = '未知';
-    document.getElementById('hero-cur').textContent = '没有一家能取到余额';
+    document.getElementById('hero-cur').textContent = '没有可自动获取的余额（见下面各家）';
     document.getElementById('hero-split').innerHTML = '<span class="none">见下面各家</span>';
   }
 
@@ -101,13 +101,15 @@ function render(){
     const isOk = s.state==='ok' && items.length;
     const st = s.state==='ok' ? 'ok' : (s.state==='error' ? 'bad' : 'unk');
     const primary = items[0] || {}, rest = items.slice(1);
+    // 措辞按状态分开：「未取到」暗示下次会补上，而 unknown 的真实含义是「这家没有可自动取数的接口」
+    const STATE_WORD = {unknown: '无自动接口', error: '取数出错', stale: '数据陈旧'}[s.state] || '未取到';
     // 金额列只放「主项」一个数（它是这家的结论），其余项压成一行小字；详情走名称列的小字，
     // 不许跑进金额列 —— 否则长理由会把金额顶出可视区（实测过）。
     const value = isOk
       ? '<span class="amt">'+esc(money(primary.value))+'<i>'+esc(primary.unit||'')+'</i></span>'
         + (rest.length ? '<em>'+rest.map(i => esc((i.label||'').replace(/^其中/, ''))+' '+esc(money(i.value))).join(' · ')+'</em>' : '')
-      : '<span class="no">'+(s.state==='error'?'出错':'未取到')+'</span>';
-    const sub = isOk ? (s.source || '') : (s.detail || (s.state==='error' ? '' : '没有可用接口'));
+      : '<span class="no">'+STATE_WORD+'</span>';
+    const sub = isOk ? (s.source || '') : (s.detail || (s.state==='error' ? '' : '这家没有可自动取数的接口'));
     const link = s.console ? '<a class="go" href="#" data-url="'+esc(s.console)+'">控制台 ↗</a>' : '';
     return '<div class="row"><span class="st '+st+'"></span>'
          + '<span class="name" title="'+esc(sub)+'">'+esc(s.name)+'<small>'+esc(sub)+'</small></span>'
@@ -128,7 +130,9 @@ function render(){
   document.getElementById('ledger-note').innerHTML =
       '金额取本机 state.db 的记账字段（Hermes 自报价目，普遍偏低），<b>只作趋势参考、不是账单</b>；'
     + '「未计价」= 那一行没有金额，不含在上面的花费里。'
-    + (book==='default' ? '当前口径：<b>仅默认 profile</b>（点「全部 6 库」看六个库合计）。' : '当前口径：<b>全部 6 库</b>。');
+    + (book==='default'
+        ? '当前口径：<b>仅默认 profile</b>（点「全部 profile」看 ' + (L.db_count||'?') + ' 个库的合计）。'
+        : '当前口径：<b>全部 profile（' + (L.db_count||'?') + ' 个库）</b>。');
 
   // 桌宠现状
   const p = DATA.pet || {};
@@ -138,6 +142,8 @@ function render(){
     ['位置', f[0]+','+f[1]], ['尺寸', (p.view_size||[0,0])[0]+'×'+(p.view_size||[0,0])[1]],
     ['贴边', p.dock], ['锚点', p.anchor_state + (p.anchor_ok?' ✓':' ✗')],
     ['圈速', (p.pump_loops_per_sec||0)+'/s'], ['状态已持续', ago(p.state_changed_ago_s)],
+    ['单击', {badge:'贴额度条', caption:'贴状态文案', none:'不显示'}[p.click_action] || (p.click_action||'—')],
+    ['额度条', p.badge_drawn || '没在显示'],
     ['进程', p.pid]
   ];
   document.getElementById('pet').innerHTML = p.alive

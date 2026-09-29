@@ -50,6 +50,10 @@ PET_FIELDS = (
     "pump_loops_per_sec",
     "fps",
     "at",
+    # 手势/额度条这两项是 2026-09-29 加的：面板要把「单击现在会做什么」显示出来，
+    # 不然用户改了设置、页面里没有任何地方能确认它生效了。
+    "click_action",
+    "badge_drawn",
 )
 
 
