@@ -17,6 +17,10 @@
    ( >  < )   小cc [working]  群聊 · 准备调用工具
 ```
 
+![右上角待机的小cc](docs/images/desktop-mockup.png)
+
+图里的窗口是真截图，背景由 `scripts/desktop_mockup.py` 画出来 —— 连作者桌面一起截的图不该进公开仓库。
+
 ## 和别的桌宠有什么不一样
 
 大多数桌宠项目（包括本人之前的尝试）都长这样：**一个宿主 + 一套贴图 + 一个窗口**，
@@ -85,7 +89,7 @@ echo '{"state":"working","detail":"编译中","step":2,"total":5}' > ~/.xiaocc/s
 macOS 显示层是常驻进程，所以它有两道闸。装上去或开机时，`ops/xiaoccctl arm` 先量 60 秒 CPU、
 再验「画面真的在动」，不达标**或证据不全**都自己停回去，绝不把一只烧电的桌宠留在桌面上；
 运行中 `ai.hermes.xiaocc.watchdog` 每 5 分钟采一次 CPU（与屏幕状态无关），连续 3 次超过 8% 就
-停掉并写好原因。本机实测：15 帧待机 **4.3%**（`ps -o time=` 取 20 秒窗口做差），
+停掉并写好原因。本机实测：15 帧待机 **3.9~4.9%**（门槛 5%；`ps -o time=` 取 20 秒窗口做差），
 自证据 `xiaocc probe` 退出码 0。门禁的测量口径与回滚方式见 [ops/README.md](ops/README.md)。
 
 ## 路线图

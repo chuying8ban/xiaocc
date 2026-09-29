@@ -6,10 +6,22 @@
 .venv/bin/python scripts/appkit_screenshots.py                # 贴边/悬停/穿透/7 状态 → 01~09
 .venv/bin/python scripts/verify_window_position.py --capture  # 初始停靠点 9 例 → 11
 .venv/bin/python scripts/art_montage.py                       # 7 状态对照图 → 13
+.venv/bin/python scripts/desktop_mockup.py                    # README 首屏图 → docs/images/（见文末）
 ```
 
 （`appkit_screenshots.py` 默认还会多写一张 `<名字>.desktop.png` = 连桌面一起截，
 用来证明角色真的浮在桌面之上；那几张被 `.gitignore` 排除，见文末。）
+
+> ⚠️ **入库的 `01~09` 这一批目前是空图，不能当证据用**（2026-09-29 发现）。`048fa6f` 那次
+> 「重跑截图」是在**显示器睡着**（`CGDisplayIsAsleep=True`）时跑的，`CGWindowListCreateImage`
+> 在这个状态下返回**全透明**的图：9 张窗口本体图 + 9 张 `.desktop.png` 的**非零字节都是 0**
+> （把 `NSBitmapImageRep.bitmapData()` 整个扫一遍数出来的，不是抽样看几眼）。
+> 断言 20/20 却照样通过，因为断言查的是窗口层级/尺寸/穿透这些**元数据**，压根不看像素。
+>
+> 在这个坑补上之前：① `appkit_screenshots.py` 抓图前应先看显示器状态，睡着就**拒跑并报错**，
+> 别静默写空图；② 把「非透明像素占比」接进断言（`scripts/pixel_stats.py` 已有现成判据），
+> 空图不许通过。屏亮时重跑一次即可恢复 —— 参照物是 `8ff7304` 那版：`09-state-done.png`
+> 320×388、非零字节 166821/496640。
 
 ## 文件对应什么
 
@@ -31,6 +43,20 @@
 那几张是连桌面一起截的（用来证明「角色浮在真实桌面之上、背后没有方框」），
 会把你桌面上其它窗口的内容一起带进仓库，所以 `.gitignore` 排除，只在本地留着。
 入库的都是**只含窗口本体**、带透明通道的图。
+
+## README 首屏图是合成的：`docs/images/desktop-mockup.png`
+
+`scripts/desktop_mockup.py` 把**只含窗口本体**的取证图贴到一块**由代码画出来的**背景上，
+位置取真机锚点（1512×982 上 `x=1324, y=96`，即默认右上角）。合成里不含任何真实壁纸 ——
+连桌面一起截的图不该进公开仓库，而透明底的窗口本体图直接贴进 README 又看不出它是浮在桌面上的。
+
+脚本自带一次自检：**再渲染一遍不带窗口的版本，两版必须字节不同**，否则说明窗口压根没贴上去
+（这个坑真踩过：`NSImage.drawInRect_` 在无 GUI 的进程里对懒加载的 PNG 静默不画 —— 背景画得出来、
+图贴不上）。出图按 2x 像素落盘（412×400 点 → 824×800 像素），贴图与像素 1:1，不糊。
+
+源图用哪张可以用 `--window` 指：默认是 `01-idle-floating.png`（待机、无字幕，不会串味）；
+要显示字幕就换 `09-state-done.png` 那类 —— 但字幕里的项目名会跟着当时的取名规则变，
+所以首屏图默认挑没有字幕的那张。
 
 ## 坐标的一个坑
 
