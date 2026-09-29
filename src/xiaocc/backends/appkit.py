@@ -1181,6 +1181,10 @@ class AppKitBackend(Backend):
         self._press_point = point
         self._press_moved = False
         self._press_max_moved = 0.0
+        # 边界行（INFO）：日志里的按压必须能机器切段。以前边界只有 debug 级的
+        # 收尾行 ⇒ INFO 采集永远看不到，解析器只能靠坐标猜（同一份日志被数成
+        # 227/245/249、68 段 ≤4px 只能人眼对，都是这个根因）。
+        log.info("按下：屏幕=(%.0f,%.0f) 按钮=左", point.x, point.y)
 
     def _mouse_dragged(self, event: Any) -> None:
         if not self._dragging:
@@ -1221,6 +1225,16 @@ class AppKitBackend(Backend):
         moved_px = self._press_max_moved
         self._press_at = None
         self._press_point = None
+        # 对称的边界行（INFO）：**拖动那一支也要有** —— 恰恰是「本想点、手抖到 4~15px
+        # 被判成拖动」的那批（约 13% 的按压）以前一行都不产，「位移=」字段只活在
+        # tap 分支里 ⇒ 按构造成全 ≤3px，拿它定 _TAP_SLOP 是幸存者偏差。
+        # 判 _TAP_SLOP 要看的量是 `_press_max_moved`（按下以来**最大**位移），不是单步。
+        log.info(
+            "按下收尾：判定=%s 位移=%.0fpx held=%.0fms",
+            "tap" if tap else "drag",
+            moved_px,
+            held_ms or 0.0,
+        )
         if tap:
             # **点击不许改几何**（用户 2026-09-29 报的 bug：单击桌宠它会自己收回去）。
             # 以前这里无条件走 end_drag() ⇒ dock.drop() ⇒ 桌宠本来就在边上，
@@ -1232,7 +1246,7 @@ class AppKitBackend(Backend):
             log.debug("点击：只收拖拽态（贴边状态保持 %s）", self._dock.state)
         else:
             edge = self.end_drag()
-            log.debug("拖拽结束：%s", edge)
+            log.info("拖拽结束：落边=%s", edge)
             return
         interval = self._double_click_interval()
         double = (now - self._last_click_at) <= interval

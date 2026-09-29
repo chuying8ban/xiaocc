@@ -24,6 +24,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sys
 import tempfile
@@ -547,6 +548,50 @@ def check_click_gestures(backend, number: int, cursor: list) -> None:
         "㉔收起成把手条时单击 ⇒ 展开成完整角色 + 气泡（否则「单击显示额度」在最常见的状态下等于没做）",
         strip_w < 40.0 and expanded > 100.0 and bool(backend._badge_lines),
         f"把手条 {strip_w:.0f}px → 点击后 {expanded:.0f}px 气泡={backend._badge_lines}",
+    )
+
+    # —— ㉕ 按压边界必须能机器切段：`按下` / `按下收尾` 两行在 **INFO 级**真的产出 ——
+    # 以前边界只有 debug 级的收尾行 ⇒ INFO 采集永远看不到，解析器只能靠坐标猜（同一份日志
+    # 被数成 227/245/249、68 段 ≤4px 只能人眼对，根因都是这个）；而「位移=」原本只活在
+    # tap 分支里 ⇒ 出行的样本按构造成全 ≤3px（幸存者偏差）。这条判据用**只收 INFO 的
+    # handler** 抓，谁把它们降回 debug 这条就红 —— 那是刻意的。
+    grabbed: list[str] = []
+
+    class _Grab(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            # 别的模块的 msg 里可能带 `%`，格式化会炸 ⇒ 兜住，只有我们要的那几行的形状要紧
+            try:
+                grabbed.append(record.getMessage())
+            except (TypeError, ValueError):
+                grabbed.append(str(record.msg))
+
+    grab_handler = _Grab(level=logging.INFO)
+    xiaocc_log = logging.getLogger("xiaocc")
+    old_level = xiaocc_log.level
+    xiaocc_log.setLevel(logging.INFO)  # 与部署一致（INFO；--verbose 才 DEBUG）
+    xiaocc_log.addHandler(grab_handler)
+    try:
+        click_here()
+        target = backend._window_local.center
+        backend._mouse_down(event_for(target, backend._window_local))
+        backend._mouse_dragged(
+            event_for(wl.Point(target.x + 40.0, target.y), backend._window_local)
+        )
+        backend.linger(0.05)
+        backend._mouse_up(None)
+        backend.linger(0.2)
+    finally:
+        xiaocc_log.removeHandler(grab_handler)
+        xiaocc_log.setLevel(old_level)
+    joined = "\n".join(grabbed)
+    _check(
+        "㉕按压边界两行在 INFO 级都产出（tap / drag 两支都有，判据量 `位移=` 也在拖动那支）",
+        "按下：屏幕=" in joined
+        and "按下收尾：判定=tap" in joined
+        and "按下收尾：判定=drag" in joined
+        and "拖拽结束：落边=" in joined,
+        f"抓到 {len(grabbed)} 行 · "
+        + " | ".join(r for r in grabbed if r.startswith(("按下", "拖拽结束")))[:160],
     )
 
 
