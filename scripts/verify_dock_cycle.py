@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import itertools
 import sys
 from pathlib import Path
 
@@ -147,7 +148,62 @@ def real() -> int:
     return 0 if ok else 1
 
 
+def real_hover(seconds: float = 3.0) -> int:
+    """用户报的那个现场：拖到右边缘松手（鼠标**就停在把手条上**），然后什么都不做。
+
+    真机日志里这之后是一串自发的 collapse/expand 震荡（每次整体上移 13px）。
+    这里原地守 N 秒，数「状态翻转」次数 —— 定点修好后应当只在收起那一刻翻一次。
+    """
+    import time
+
+    from xiaocc.backends.appkit import AppKitBackend
+    from xiaocc.characters import load_character
+    from xiaocc.engine import Render
+    from xiaocc.protocol import State, StatusEvent
+
+    character = load_character()
+    cursor = [wl.Point(-1000.0, -1000.0)]
+    backend = AppKitBackend(cursor=lambda: cursor[0])
+    backend.render(Render(event=StatusEvent(source="demo", state=State.IDLE), character=character))
+    backend.linger(0.3)
+    screen = backend._space().screen
+    target_x = screen.right - wl.PAD - character.canvas[0] * backend._scale() - 4.0
+    _drag_to(backend, cursor, max(screen.x, target_x), backend._window_local.y)
+    backend.end_drag()
+    print(f"松手时鼠标停在 {cursor[0]}，窗口 {backend._window_local}")
+    # 收起后必须「鼠标先离开一次」才重新武装（防抖规则），所以先走开再回来 ——
+    # 回来时鼠标压在把手条正中间，这才是「展开必须盖住鼠标、展开后不许自己缩回去」的现场
+    cursor[0] = wl.Point(screen.center.x, screen.center.y)
+    backend.linger(0.5)
+    strip = backend._window_local
+    cursor[0] = wl.Point(strip.center.x, strip.center.y)
+    armed = backend.probe().get("dock")
+    print(f"走开一次重新武装，再回到把手条中心 {cursor[0]}（{armed}）")
+
+    samples: list[tuple[float, str]] = []
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        backend.linger(0.1)
+        samples.append((round(backend._window_local.y, 1), str(backend.probe().get("dock"))))
+    flips = sum(1 for a, b in itertools.pairwise(samples) if a[1] != b[1])
+    ys = [s[0] for s in samples]
+    print(f"{seconds:g}s 内采样 {len(samples)} 次：状态翻转 {flips} 次，y 跨度 {max(ys) - min(ys):g}px")
+    print(f"先头几次采样 {samples[:6]}")
+    # 期望：采样窗口内**一次都不许翻**（悬停展开发生在采样之前那段 linger 里），
+    # 而且停在展开态、展开后仍盖住鼠标 —— 事故版的现场就是这里反复翻 + 每次上移 13px。
+    inside = backend._window_local.contains(cursor[0], wl.HOVER_GRACE)
+    expanded = str(backend.probe().get("dock")) == "expanded"
+    stable = max(ys) - min(ys) < 0.01
+    ok = flips == 0 and stable and inside and expanded
+    print(f"停在展开态={expanded}  展开后仍盖住鼠标={inside}  采样窗口内一动不动={stable}")
+    print("结果：" + ("悬停展开一次后彻底安静，不再自发震荡 ✓" if ok else "仍在震荡 ✗"))
+    backend.close()
+    return 0 if ok else 1
+
+
 def main() -> int:
+    if "--real-hover" in sys.argv:
+        return real_hover()
     return real() if "--real" in sys.argv else geometry()
 
 

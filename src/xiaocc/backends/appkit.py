@@ -20,10 +20,12 @@ c. 通用程序化骨架：只用 ``palette`` + ``canvas`` + ``motion`` 画「�
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import math
 import os
+import tempfile
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, fields, is_dataclass
@@ -473,9 +475,20 @@ class AppKitBackend(Backend):
             )
             target = self.probe_path()
             target.parent.mkdir(parents=True, exist_ok=True)
-            tmp = target.with_name(target.name + ".tmp")
-            tmp.write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
-            os.replace(tmp, target)
+            # 临时名必须唯一：面板和验证脚本可能同时在写这份自证据，固定叫 ``.tmp``
+            # 会有两个进程抢同一个临时文件，其中一个 os.replace 时扑空（ENOENT）。
+            # 和 anchor_store 一样用 mkstemp。
+            fd, tmp_name = tempfile.mkstemp(
+                prefix=target.name + ".", suffix=".tmp", dir=str(target.parent)
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    handle.write(json.dumps(info, ensure_ascii=False, indent=2))
+                os.replace(tmp_name, target)
+            except BaseException:
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_name)
+                raise
             self._probe_warned = False
         except Exception as exc:  # noqa: BLE001 —— 诊断文件写不进去不该带崩桌宠
             if not self._probe_warned:
