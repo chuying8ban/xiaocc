@@ -14,6 +14,40 @@ from pathlib import Path
 from xiaocc import settings as S
 
 
+def test_device_and_all_are_accepted_names() -> None:
+    """用户 2026-09-29 新要的「设备状态」「额度+设备」两档 —— 手写进 JSON 也不许被回落。"""
+    for name in ("device", "all"):
+        value, problems = S.normalize({"click_action": name})
+        assert value["click_action"] == name
+        assert problems == [], f"{name} 是合法值，不许记问题"
+
+
+def test_old_caption_name_is_normalized_to_device() -> None:
+    """旧名 ``caption``（「状态文案」）读进来就是 ``device``，**而且不算问题**。
+
+    这台机器的 ``settings.json`` 里此刻正写着 ``caption`` —— 用户把那个词重定义成「电脑的状态」，
+    所以它是**近义词**不是拼错：既不回落、也不该弹「设置文件有问题」吓人。
+    """
+    value, problems = S.normalize({"click_action": "caption"})
+    assert value["click_action"] == "device"
+    assert problems == []
+
+
+def test_saving_the_old_name_writes_the_new_one(tmp_path: Path) -> None:
+    """写盘只落新名：老配置被改一次就自动升级，不会永远留着近义词。"""
+    target = tmp_path / "settings.json"
+    target.write_text(json.dumps({"click_action": "caption"}), encoding="utf-8")
+    S.save({"click_action": "all"}, target)
+    assert json.loads(target.read_text(encoding="utf-8"))["click_action"] == "all"
+
+
+def test_every_action_has_a_label() -> None:
+    """面板那排按钮的文案来自这张表 —— 缺一个就会露出英文枚举名给用户看。"""
+    assert set(S.CLICK_ACTION_LABELS) == set(S.CLICK_ACTIONS)
+    assert S.CLICK_ACTION_LABELS["device"] == "设备状态"
+    assert S.CLICK_ACTION_LABELS["all"] == "额度+设备"
+
+
 def test_missing_file_uses_defaults(tmp_path: Path) -> None:
     target = tmp_path / "settings.json"
     assert S.load(target) == S.DEFAULTS

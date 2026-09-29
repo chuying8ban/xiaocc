@@ -186,10 +186,11 @@ function render(){
   document.getElementById('tag-set').textContent = S.path ? S.path.split('/').pop() : 'settings.json';
   document.getElementById('click-actions').innerHTML = (S.actions||['badge','caption','none'])
     .map(a => '<button data-act="'+esc(a)+'" class="'+(a===cur?'on':'')+'">'+esc(labels[a]||a)+'</button>').join('');
-  const prevLines = Array.isArray(S.bubble_preview) ? S.bubble_preview : [S.bubble_preview || '—'];
-  document.getElementById('bubble-preview').innerHTML =
-    '气泡里写的是：<b>' + prevLines.map(esc).join('<br>') + '</b>'
-    + '<span class="none">（两行；放不下会自动缩到更短一档）</span>';
+  const prevLines = Array.isArray(S.bubble_preview) ? S.bubble_preview : [S.bubble_preview || ''];
+  document.getElementById('bubble-preview').innerHTML = prevLines.length
+    ? '气泡里写的是：<b>' + prevLines.map(esc).join('<br>') + '</b>'
+      + '<span class="none">（两行；放不下会自动缩到更短一档）</span>'
+    : '这一档单击小cc <b>不会有气泡</b>（只把鼠标从贴边收起的状态里放出来）';
   document.getElementById('set-note').innerHTML = (S.problems && S.problems.length)
     ? '设置文件有问题：' + esc(S.problems.join('；')) + '（已按默认值用）'
     : '改完立刻生效 —— 桌宠每 5 秒重读一次设置，不用重启它。气泡在屏上停 5 秒，最后 1.2 秒淡出。';

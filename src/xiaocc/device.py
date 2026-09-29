@@ -234,6 +234,58 @@ def human_bytes(value: float) -> str:
     return f"{int(value)} B"
 
 
+def human_bytes_decimal(value: float) -> str:
+    """字节 → 「994.6 GB」。**磁盘专用**：macOS 自己的「关于本机」/Finder 按 1000 进位报磁盘
+    （实测 Data 卷 193.3 GB，与 ``diskutil info`` 的 ``Volume Used Space`` 逐字一致），
+    而内存相反 —— ``hw.memsize`` 25769803776 B 被「关于本机」叫 24 GB，那是 GiB。
+    所以内存继续走 :func:`human_bytes`、磁盘走这个：**两个口径各自跟系统自己的说法对齐**，
+    别各漂一半（二进制算出来挂 GB 标签，用户拿 Finder 一对就是 926.3 vs 994.6）。
+    """
+    for unit, scale in (("GB", 1000.0**3), ("MB", 1000.0**2), ("KB", 1000.0)):
+        if value >= scale:
+            return f"{value / scale:.1f} {unit}"
+    return f"{int(value)} B"
+
+
+#: 跟 Finder 对齐要看 **Data 卷自己**的消耗（statvfs 在 APFS 上给的是容器口径，见下）
+_DF_TARGET = "/System/Volumes/Data"
+
+
+def parse_df_k(text: str) -> tuple[int, int] | None:
+    """``df -k <path>`` 输出 → ``(used, total)`` 字节。取**最后一行**，第 2/3 列是 1024 字节块。"""
+    line = next((ln for ln in reversed(text.splitlines()) if ln.strip()), "")
+    parts = line.split()
+    if len(parts) < 3:
+        return None
+    try:
+        total = int(parts[1]) * 1024
+        used = int(parts[2]) * 1024
+    except ValueError:
+        return None
+    return (used, total) if total > 0 else None
+
+
+def disk_usage_best() -> tuple[int, int] | None:
+    """``(used, total)`` 字节，**优先 Data 卷自己的消耗**（Finder / ``diskutil`` 的口径）。
+
+    APFS 上 ``statvfs``（``shutil.disk_usage`` 走它）给的是**容器**口径：本机实测 ``/`` 与
+    ``/System/Volumes/Data`` 返回值一字不差（都 221.7 GB / 994.6 GB，@researcher 先查到、我也核过），
+    而 Finder 报的是 Data 卷自己的 **193.3 GB** —— 差那 28 GB 是 System/Preboot/Recovery/VM
+    几个看不见的卷。用户会拿 Finder 对，所以按卷口径走 ``df``（同族做法：本模块已经在 shell
+    ``vm_stat``/``pmset``）。拿不到就退回容器口径 —— **宁可口径注明，也别报 0**。
+    """
+    out = _run(["df", "-k", _DF_TARGET])
+    parsed = parse_df_k(out) if out else None
+    if parsed is not None:
+        return parsed
+    try:
+        usage = shutil.disk_usage(_DF_TARGET if os.path.exists(_DF_TARGET) else "/")
+    except OSError:
+        log.debug("磁盘用量读不到", exc_info=True)
+        return None
+    return (usage.used, usage.total)
+
+
 @dataclass(frozen=True)
 class Device:
     """一次设备快照。**每个字段都可能为 None**（取不到就如实说，不补 0）。"""
@@ -274,7 +326,7 @@ class Device:
             rows.append(
                 (
                     "磁盘",
-                    f"{human_bytes(self.disk_used)} / {human_bytes(self.disk_total)}（{pct:.0f}%）",
+                    f"{human_bytes_decimal(self.disk_used)} / {human_bytes_decimal(self.disk_total)}（{pct:.0f}%）",
                 )
             )
         else:
@@ -303,11 +355,7 @@ def snapshot(prev_ticks: tuple[int, int] | None = None) -> Device:
         load = os.getloadavg()
     except OSError:
         load = None
-    disk = None
-    try:
-        disk = shutil.disk_usage("/")
-    except OSError:
-        log.debug("磁盘用量读不到", exc_info=True)
+    disk = disk_usage_best()
     batt = None
     out = _run(["pmset", "-g", "batt"])
     if out:
@@ -328,8 +376,8 @@ def snapshot(prev_ticks: tuple[int, int] | None = None) -> Device:
         cpu_count=os.cpu_count(),
         mem_used=mem_used,
         mem_total=mem_total,
-        disk_used=disk.used if disk else None,
-        disk_total=disk.total if disk else None,
+        disk_used=disk[0] if disk else None,
+        disk_total=disk[1] if disk else None,
         battery=batt,
         uptime_s=(now - boot) if boot else None,
     )

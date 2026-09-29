@@ -108,6 +108,36 @@ def test_human_duration() -> None:
     assert human_duration(86400 * 3 + 3600 * 4) == "3 天 4 小时"
 
 
+def test_human_bytes_decimal_matches_what_macos_says_for_disks() -> None:
+    """磁盘按 1000 进位（跟「关于本机」/``diskutil`` 一致），内存按 1024（同样跟系统一致）。"""
+    from xiaocc.device import human_bytes_decimal
+
+    assert human_bytes_decimal(994610155520) == "994.6 GB"
+    assert human_bytes_decimal(193317859328) == "193.3 GB"
+
+
+def test_parse_df_k_reads_the_data_volume_own_usage() -> None:
+    """真机 ``df -k /System/Volumes/Data`` 实录（2026-09-29）—— 两个体积都要对上。"""
+    from xiaocc.device import parse_df_k
+
+    assert parse_df_k(DF_K_DATA_REAL) == (188787036 * 1024, 971298980 * 1024)
+    assert parse_df_k("") is None
+    assert parse_df_k("Filesystem 1024-blocks Used Available") is None  # 只有表头
+
+
+def test_disk_usage_best_is_volume_scoped_and_never_raises() -> None:
+    """真机跑一次：**不该**是 statvfs 的容器口径（本机实测差 28 GB）。"""
+    from xiaocc.device import disk_usage_best
+
+    got = disk_usage_best()
+    assert got is None or (got[0] > 0 and got[1] > got[0])
+
+
+DF_K_DATA_REAL = """Filesystem     1024-blocks      Used Available Capacity iused      ifree %iused  Mounted on
+/dev/disk3s5     971298980 188787036 754754944    21%  972249 7547549440    0%   /System/Volumes/Data
+"""
+
+
 def test_human_bytes() -> None:
     assert human_bytes(24 * 1024**3) == "24.0 GB"
     assert human_bytes(512 * 1024**2) == "512.0 MB"
@@ -134,15 +164,15 @@ def test_lines_shape() -> None:
         cpu_count=10,
         mem_used=15627796480,
         mem_total=25769803776,
-        disk_used=221318344704,
-        disk_total=994610155520,
+        disk_used=193317859328,  # Data 卷自己的消耗（diskutil 的 Volume Used Space）
+        disk_total=994610155520,  # 容器总容量（「关于本机」报 994.6 GB）
         battery=(90, "接电源", "未充电"),
         uptime_s=123178.0,
     )
     rows = dict(device.lines())
     assert rows["CPU"] == "14% · 负载 2.50 / 2.52 / 2.64（10 核）"
     assert rows["内存"] == "14.6 GB / 24.0 GB（61%）"
-    assert rows["磁盘"] == "206.1 GB / 926.3 GB（22%）"
+    assert rows["磁盘"] == "193.3 GB / 994.6 GB（19%）"
     assert rows["电池"] == "90% 接电源 · 未充电"
     assert rows["已开机"] == "1 天 10 小时"
 

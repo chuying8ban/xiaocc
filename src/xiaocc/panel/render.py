@@ -63,13 +63,32 @@ PET_FIELDS = (
 _DEVICE_SAMPLER = device_mod.Sampler()
 
 
-def _device_block() -> dict[str, Any]:
-    """设备状态（CPU / 内存 / 磁盘 / 电池 / 已开机）。**采不到就空着**，页面写「未取到」。"""
+def _device_snapshot() -> Any:
+    """采一次设备状态（失败返回 ``None``）。设备卡与**气泡预览共用同一刻**的这份快照。"""
     try:
-        dev = _DEVICE_SAMPLER.get(fresh=True)
+        return _DEVICE_SAMPLER.get(fresh=True)
     except (OSError, ValueError):  # 页面渲染不许被设备采集带崩
+        return None
+
+
+def _device_block(dev: Any) -> dict[str, Any]:
+    """设备状态（CPU / 内存 / 磁盘 / 电池 / 已开机）。**采不到就空着**，页面写「未取到」。"""
+    if dev is None:
         return {"rows": [], "sampled_at": None}
     return {"rows": [[title, value] for title, value in dev.lines()], "sampled_at": dev.taken_at}
+
+
+def _preview_lines(action: str, report: Any, meta: Any, device: Any) -> list[str]:
+    """当前档位下气泡**实际会写**的那两行。
+
+    必须跟气泡走同一个函数（``quota.badge.bubble_candidates``）：面板曾经写死按「额度」档预览，
+    用户选「设备状态」时页面照样承诺"气泡里写的是：DeepSeek ¥66.30…" —— 预览和真气泡分叉，
+    比没有预览更糟。``none`` 档返回空表，页面自己会说「不显示」。
+    """
+    from ..quota.badge import bubble_candidates
+
+    candidates = bubble_candidates(action, report=report, meta=meta, device=device)
+    return list(candidates[0]) if candidates else []
 
 
 def _pet_snapshot(probe_path: Path) -> dict[str, Any]:
@@ -98,17 +117,18 @@ def build_payload(
 ) -> dict[str, Any]:
     """组装页面数据。**取不到就是取不到** —— 这里不补 0、不编数。"""
     from .. import settings as settings_store
-    from ..quota.badge import badge_bubble_candidates
     from ..quota.base import now_iso as _now_iso
 
     report, meta = load_quota(Path(quota_path))
     described = settings_store.describe(settings_path)
+    dev = _device_snapshot()
+    action = str(described.get("click_action") or "badge")
     return {
         "theme": theme if theme in ("night", "paper") else "night",
         "rendered_at": now_iso or _now_iso(),
         "quota": {"meta": meta, "report": report or {}},
         "pet": _pet_snapshot(Path(probe_path)),
-        "device": _device_block(),
+        "device": _device_block(dev),
         "settings": {
             "path": str(settings_path or settings_store.settings_path()),
             "schema": described.get("schema", 1),
@@ -116,10 +136,10 @@ def build_payload(
             "actions": list(settings_store.CLICK_ACTIONS),
             "labels": dict(settings_store.CLICK_ACTION_LABELS),
             "problems": described.get("problems") or [],
-            # 预览必须跟气泡**同一个函数、同一种形态**：气泡是两行（badge_bubble_candidates
-            # 挑出来的候选），拿单行那套 badge_text() 去显示就会出现「面板说会写 X、气泡只写了
-            # X 的一半」——千问云那条单行量出来 230px，一行根本画不下。同源 + 同形态两条都要。
-            "bubble_preview": list(badge_bubble_candidates(report, meta)[0]),
+            # 预览必须跟气泡**同一个函数、同一种形态**：气泡是两行（bubble_candidates 挑出来的
+            # 候选），拿单行那套 badge_text() 去显示就会出现「面板说会写 X、气泡只写了 X 的一半」
+            # ——千问云那条单行量出来 230px，一行根本画不下。同源 + 同形态 + **同一档位**三条都要。
+            "bubble_preview": _preview_lines(action, report, meta, dev),
         },
     }
 

@@ -11,8 +11,8 @@
      ⇒ 改成 ``dict(body)``。
 
 判据（全部真窗口、真点击、真落盘）：
-  ①「状态文案」⇒ 沙箱 settings.json 的 click_action 变 caption
-  ② 页面上的选中态跟着走（.on 落在 caption 上，不是只看文件）
+  ①「设备状态」⇒ 沙箱 settings.json 的 click_action 变 device
+  ② 页面上的选中态跟着走（.on 落在 device 上，不是只看文件）
   ③ 点回「额度」⇒ 变回 badge（双向都验，免得只对一次）
   ④ 每个按钮点一遍都不出 JS 错（空壳子/半死按钮在这条上现形）
 
@@ -118,18 +118,18 @@ def main() -> int:
     def step2(_t=None) -> None:
         check(
             "①面板打开时：选中态在设置里那一项上",
-            sink.get("selected0", (None,))[0] == "badge* caption none",
+            sink.get("selected0", (None,))[0] == "badge* device all none",
             f"页面={sink.get('selected0', (None, None))[0]} 设置={read_settings()}",
         )
-        js(CLICK % "caption", sink, "click1")
+        js(CLICK % "device", sink, "click1")
         NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.9, False, step3)
 
     def step3(_t=None) -> None:
         click_result = str(sink.get("click1", (None, None))[0] or "")
         after = click_result.split(" => ")[-1]
         check(
-            "②点「状态文案」⇒ 真落盘 + **页面当场**就切过去（不是空壳子）",
-            read_settings() == "caption" and after == "badge caption* none",
+            "②点「设备状态」⇒ 真落盘 + **页面当场**就切过去（不是空壳子）",
+            read_settings() == "device" and after == "badge device* all none",
             f"JS={click_result} 设置={read_settings()}",
         )
         js(SELECTED, sink, "selected1")
@@ -138,7 +138,7 @@ def main() -> int:
     def step4(_t=None) -> None:
         check(
             "③重渲染后选中态跟着走（页面上看得见，不是只有文件变）",
-            sink.get("selected1", (None,))[0] == "badge caption* none",
+            sink.get("selected1", (None,))[0] == "badge device* all none",
             f"页面={sink.get('selected1', (None, None))[0]}",
         )
         js(CLICK % "badge", sink, "click2")
@@ -149,18 +149,29 @@ def main() -> int:
         after = click_result.split(" => ")[-1]
         check(
             "④点回「额度」⇒ 双向都能改（页面当场切回 badge*）",
-            read_settings() == "badge" and after == "badge* caption none",
+            read_settings() == "badge" and after == "badge* device all none",
             f"JS={click_result} 设置={read_settings()}",
         )
-        js(CLICK % "none", sink, "click3")
+        js(CLICK % "all", sink, "click3")
         NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.9, False, step6)
 
     def step6(_t=None) -> None:
         click_result = str(sink.get("click3", (None, None))[0] or "")
         after = click_result.split(" => ")[-1]
         check(
-            "⑤「不显示」也点到（三个按钮一个不落，页面当场切过去）",
-            read_settings() == "none" and after == "badge caption none*",
+            "⑤「额度+设备」也点到（用户 2026-09-29 新要的那档，页面当场切过去）",
+            read_settings() == "all" and after == "badge device all* none",
+            f"JS={click_result} 设置={read_settings()}",
+        )
+        js(CLICK % "none", sink, "click4")
+        NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.9, False, step6b)
+
+    def step6b(_t=None) -> None:
+        click_result = str(sink.get("click4", (None, None))[0] or "")
+        after = click_result.split(" => ")[-1]
+        check(
+            "⑥「不显示」也点到（四个按钮一个不落，页面当场切过去）",
+            read_settings() == "none" and after == "badge device all none*",
             f"JS={click_result} 设置={read_settings()}",
         )
         # 顶栏三个按钮：刷新 / 主题 / 关闭 —— 只验「点了不报错」，别把面板关掉
@@ -177,7 +188,7 @@ def main() -> int:
         refresh_err = sink.get("refresh", (None, None))[1]
         theme_value = sink.get("theme", (None, None))[0]
         check(
-            "⑥顶栏「刷新」「主题」也活着（不是只有中间那排能按）",
+            "⑦顶栏「刷新」「主题」也活着（不是只有中间那排能按）",
             refresh_err is None and theme_value in ("night", "paper"),
             f"刷新错误={refresh_err} 主题={theme_value}",
         )

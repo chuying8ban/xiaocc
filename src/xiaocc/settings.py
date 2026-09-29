@@ -19,13 +19,21 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-#: 单击小cc 时做什么。``badge`` 显示额度条、``caption`` 显示状态文案、``none`` 什么都不显示。
-CLICK_ACTIONS = ("badge", "caption", "none")
+#: 单击小cc 时做什么。``badge`` 显示额度条、``device`` 显示**电脑状态**（CPU/内存/磁盘/电池）、
+#: ``all`` 两样都要（一行额度 + 一行设备）、``none`` 什么都不显示。
+#: ``caption``（旧的「状态文案」）**继续认**、读入时映射成 ``device``：用户 2026-09-29 把这个词
+#: 重定义成「电脑的状态」，而这台机器的 settings.json 里此刻正写着 ``caption`` —— 直接摘掉枚举
+#: 会让它回落默认，用户会以为自己的设置被吃了。
+CLICK_ACTIONS = ("badge", "device", "all", "none")
 
-#: 单击动作的中文名（菜单/设置页共用一份，别在两处各写一份）
+#: 旧枚举名 → 新枚举名（只在**读入规范化**里用；写盘只写新名）
+CLICK_ACTION_ALIASES = {"caption": "device"}
+
+#: 单击动作的中文名（面板/菜单共用一份，别在两处各写一份）
 CLICK_ACTION_LABELS = {
     "badge": "额度",
-    "caption": "状态文案",
+    "device": "设备状态",
+    "all": "额度+设备",
     "none": "不显示",
 }
 
@@ -57,6 +65,7 @@ def normalize(raw: Mapping[str, Any] | None) -> tuple[dict[str, Any], list[str]]
             continue
         value = raw[key]
         if key == "click_action":
+            value = CLICK_ACTION_ALIASES.get(value, value)
             if value in CLICK_ACTIONS:
                 out[key] = value
             else:

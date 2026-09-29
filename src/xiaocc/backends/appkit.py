@@ -38,7 +38,7 @@ from ..characters import Character
 from ..engine import Render
 from ..protocol import STATE_TTL, State
 from ..quota import default_quota_path
-from ..quota.badge import badge_bubble_candidates
+from ..quota.badge import bubble_candidates
 from ..quota.store import load as load_quota_report
 from . import appkit_art
 from . import window_layout as wl
@@ -1285,26 +1285,27 @@ class AppKitBackend(Backend):
         return str(self._settings.get("click_action") or "badge")
 
     def _do_click_action(self) -> None:
-        action = self._click_action()
-        if action == "badge":
-            self._show_badge()
-        elif action == "caption":
-            self._show_badge(lines=[self._current_caption()])
-        else:
+        """单击按设置执行：``badge`` 额度 / ``device`` 电脑状态 / ``all`` 两样 / ``none`` 不显示。
+
+        这是**唯一**的破例入口（单击不挂起等双击，2026-09-29 用户定的语义）—— 所以这里必须
+        「立刻就有东西出来」，不许先做别的再显示。
+        """
+        raw = self._click_action()
+        action = settings_store.CLICK_ACTION_ALIASES.get(raw, raw)  # 旧名 caption == device
+        if action == "none":
             self._hide_badge()
             log.debug("单击：设置是「不显示」，什么都不做")
-
-    def _current_caption(self) -> str:
-        frame, character = self._frame, self._character
-        if frame is None or character is None:
-            return ""
-        return frame.caption or character.spec(frame.state).caption or ""
+            return
+        # 设备数在**点击这一刻**采一次就冻结：气泡是每帧重画的（5 秒 ≈75 帧），把 get() 挪进
+        # 绘制路径就会每 2 秒（TTL）在主线程掉一帧，而且数字跳变还会让气泡重新拆行 ⇒ 看起来在抖。
+        device = self._device.get() if action in ("device", "all") else None
+        self._show_badge(lines=self._bubble_lines(action, device))
 
     def _show_badge(self, lines: Sequence[str] | None = None) -> None:
-        """弹一枚 5 秒的对话气泡（默认额度；也可以是设置里选的「状态文案」）。不碰引擎、不改 state。
+        """弹一枚 5 秒的对话气泡（默认额度档）。不碰引擎、不改 state。
 
-        行数由 :func:`xiaocc.quota.badge.badge_bubble_candidates` 按气泡可用宽度挑（最长那句放不下
-        就退到更短的一条），所以气泡里不会出现「第一行撑满、第二行只剩两个字」的半句话。
+        行数由 :func:`xiaocc.quota.badge.bubble_candidates` 按档位出候选、再按气泡可用宽度挑
+        （最长那句放不下就退到更短的一条），所以气泡里不会出现「第一行撑满、第二行只剩两个字」。
         """
         if lines is None:
             lines = self._quota_badge_lines()
@@ -1337,19 +1338,29 @@ class AppKitBackend(Backend):
             self._badge_dirty = True
 
     def _quota_badge_lines(self) -> list[str]:
-        """气泡里那两行：读一次 ``quota.json``（本地小文件，点击才读），挑**每行都放得下**的最长一条。"""
+        """额度档那两行（兼容入口：菜单/回归脚本在用的老名字）。"""
+        return self._bubble_lines("badge")
+
+    def _bubble_lines(self, action: str, device: Any = None) -> list[str]:
+        """气泡里那两行：按档位从 ``quota.badge`` 的候选里挑**每行都放得下**的最长一条。
+
+        读一次 ``quota.json``（本地小文件，点击才读）。``device`` 由调用方在**点击那一刻**采好
+        传进来（冻结，见 :meth:`_do_click_action`）。
+        """
         try:
             # 路径在**调用时**解析（不是 import 时），回归脚本才能用 XIAOCC_QUOTA_FILE 指到假报告上
             report, meta = load_quota_report(default_quota_path())
         except Exception as exc:  # noqa: BLE001 - 读不到就如实说「未采集」
             log.warning("读额度失败：%s", exc)
-            return ["额度未采集", "点开面板看详情"]
-        candidates = badge_bubble_candidates(report, meta)
+            report, meta = None, None
+            if action in ("badge", "all"):  # 这两档额度是主菜，读不到就直说
+                return ["额度未采集", "点开面板看详情"]
+        candidates = bubble_candidates(action, report=report, meta=meta, device=device)
         width = self._bubble_text_width()
         for candidate in candidates:
-            if all(self._text_fits(line, width) for line in candidate):
+            if candidate and all(self._text_fits(line, width) for line in candidate):
                 return list(candidate)
-        return list(candidates[-1]) if candidates else ["额度未采集", "点开面板看详情"]
+        return list(candidates[-1]) if candidates else []
 
     @staticmethod
     def _text_fits(text: str, width: float) -> bool:
