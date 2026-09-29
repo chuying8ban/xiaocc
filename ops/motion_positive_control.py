@@ -27,7 +27,7 @@ W, H = 120.0, 60.0
 
 class SpinView(NSView):
     def initWithFrame_(self, frame):
-        self = objc.super(SpinView, self).initWithFrame_(frame)
+        self = objc.super(SpinView, self).initWithFrame_(frame)  # noqa: PLW0642  pyobjc 惯用法，此规则对它是误报
         if self is not None:
             self.t = 0.0
         return self

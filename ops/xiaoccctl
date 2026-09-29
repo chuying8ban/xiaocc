@@ -46,15 +46,23 @@ PANEL_ERR="$LOGDIR/panel.err.log"
 CTL_LOG="$LOGDIR/xiaoccctl.log"
 PY="$PROJECT_DIR/.venv/bin/python"
 ENTRY="$PROJECT_DIR/.venv/bin/xiaocc"
+#: 判「屏上有几只面板」用的 pgrep 模式（watchdog 用同一个口径，可用环境变量接管以便沙箱测试）
+INSTANCE_MATCH="${XIAOCC_INSTANCE_MATCH:-([.]venv/bin/xiaocc|-m xiaocc[.]cli) run}"
 
 # 退出码：0 正常 / 1 未运行 / 2 用法错 / 3 没装 / 4 操作或自检失败
 mkdir -p "$LOGDIR" 2>/dev/null
 
-_rotate() {  # _rotate <file> <阈值字节>
+_rotate() {  # _rotate <file> <阈值字节>  —— 先拷到 .1，再**就地**截断（不能用 mv）
+  # 为什么不能用 mv：launchd 的 StandardOutPath/StandardErrorPath 是 **O_APPEND** 打开的（用可抛标签
+  # 实测：就地截断后新写入落在文件开头、不产生 NUL 空洞）。mv 只搬名字、不搬 fd 指向的 inode，
+  # 所以 app 会**继续写进** $f.1，而「当前日志」永远停在轮转那一刻——看起来轮转成功，其实把活日志偷走了。
+  # 代价：cp 与截断之间写进来的几行会丢；面板日志是诊断材料，不是审计账，接受。
   local f="$1" cap="${2:-200000}" sz
   [[ -f "$f" ]] || return 0
   sz=$(wc -c <"$f" 2>/dev/null | tr -d ' ')
-  [[ -n "${sz:-}" ]] && (( sz > cap )) && mv -f "$f" "$f.1"
+  if [[ -n "${sz:-}" ]] && (( sz > cap )); then
+    if cp -f "$f" "$f.1" 2>/dev/null; then : >"$f"; fi
+  fi
   return 0
 }
 
@@ -527,17 +535,33 @@ _json_get() { print -r -- "$1" | sed -n "s/.*\"$2\": *\([^,}]*\).*/\1/p" | head 
 # 外加一条反忙等护栏（圈速远超 fps = 又退回空转）。圈速不再是硬判据 —— 动画若交给合成器做，
 # 进程本就该睡着，拿圈速判会冤枉一条更好的实现。
 cmd_gate() {
-  local secs="${1:-60}" pid cpu disp probe_out probe_rc motion m_changed m_pct astate loops fps busy cpu_ok=0 motion_ok=0 note=""
+  local secs="${1:-60}" pid cpu disp cpu_line probe_out probe_rc motion m_changed m_pct astate loops fps busy cpu_ok=0 motion_ok=0 note="" inst other
   _installed || { print -u2 "xiaoccctl: 没安装（$PLIST_DST）"; return 3; }
   pid="$(_pid)"
   if [[ -z "$pid" ]]; then
     print "✗ 面板没在跑（job 未加载）。先 start，再门禁；没有进程可量。"
     return 4
   fi
+  # 前置：只认**单实例**（pgrep 实数）。手工 `--linger` 起的臂对 launchctl 完全隐形（实测有一个
+  # 白烧 3.5h / 9.6%，watchdog 一行都没记），而判据②取的是「相交显示区的最大窗口」——真有第二只在屏上，
+  # 量的可能不是受管那只。前置不满足时**不判门槛、也不停面板**，单独用退出码 6 表示「环境不对」。
+  inst=$({ pgrep -f "$INSTANCE_MATCH" 2>/dev/null || true; } | grep -c .)
+  if [[ "$inst" != "1" ]]; then
+    other=$({ pgrep -f "$INSTANCE_MATCH" 2>/dev/null || true; } | grep -v "^${pid}$" | tr '\n' ' ')
+    print "✗ 前置不满足：屏上有 ${inst} 个实例（受管 pid=${pid}；另有 ${other:-无}）"
+    print "   门禁只认单实例：多出来的那只既可能白烧 CPU，也会让判据②量错窗口。先清掉再测（不清也不停面板）。"
+    _log "gate: 前置不满足 屏上 ${inst} 个实例（受管 pid=${pid}，另有 ${other:-无}）"
+    return 6
+  fi
+
   disp="$(_display_state)"
-  print "== 门槛测量：${secs}s 稳态 CPU + 外部画面判据 / 显示状态：${disp} =="
+  # 判据①**按显示状态分档**（@lead 2026-09-29 定）：屏醒未锁 ≤7%（本轮基线 5.4~5.7%）；屏睡/锁屏 ≤5%（史线不动）。
+  # 同一面板两种状态的读数差 1~2 个百分点（实测：A 版屏睡 3.5~4.6% / 屏醒 5.4~5.7%），拿屏睡线去判屏醒读数
+  # 会把一个还在正常带宽里的面板判死。档位与线一起进留痕。
+  if [[ "$disp" == "醒着" ]]; then cpu_line=7.0; else cpu_line=5.0; fi
+  print "== 门槛测量：${secs}s 稳态 CPU + 外部画面判据 / 显示状态：${disp}（判据①线 <${cpu_line}%）=="
   cpu=$(_cpu_pct "$pid" "$secs")
-  print "  A) CPU：${cpu}%（门槛 <5%）"
+  print "  A) CPU：${cpu}%（门槛 <${cpu_line}%，档=${disp}）"
 
   probe_out=$("$ENTRY" probe 2>&1); probe_rc=$?
   motion=$(_motion_json "$pid" 3 0.7)
@@ -567,11 +591,11 @@ cmd_gate() {
   if [[ -n "$loops" && -n "$fps" ]]; then
     busy=$("$PY" -c "print(1 if float('${loops}') > 2.0 * float('${fps}') else 0)" 2>/dev/null || print 0)
   fi
-  [[ "$("$PY" -c "print(1 if float('${cpu}') < 5.0 else 0)" 2>/dev/null)" == "1" ]] && cpu_ok=1
+  [[ "$("$PY" -c "print(1 if float('${cpu}') < float('${cpu_line}') else 0)" 2>/dev/null)" == "1" ]] && cpu_ok=1
 
   if (( cpu_ok == 1 && motion_ok == 1 && busy == 0 )); then
-    print "== 门槛通过：CPU ${cpu}% <5% 且画面真在动 =="
-    _log "gate: 通过 cpu=${cpu}% motion=${m_changed}(${m_pct}%) 圈速=${loops:-?} 显示=${disp}"
+    print "== 门槛通过：CPU ${cpu}% <${cpu_line}%（档=${disp}）且画面真在动 =="
+    _log "gate: 通过 cpu=${cpu}% 线=${cpu_line}% 档=${disp} motion=${m_changed}(${m_pct}%) 圈速=${loops:-?}"
     return 0
   fi
   if (( motion_ok == -1 )); then
@@ -581,9 +605,9 @@ cmd_gate() {
     _log "gate: 不可判读 cpu=${cpu}% 显示=${disp}"
     return 5
   fi
-  print "== 门槛不通过 ==（CPU 达标=${cpu_ok}、画面在动=${motion_ok}、忙等护栏=${busy}）"
+  print "== 门槛不通过 ==（CPU ${cpu}% 对线 ${cpu_line}% 达标=${cpu_ok}、画面在动=${motion_ok}、忙等护栏=${busy}）"
   (( busy == 1 )) && print "  ⚠️ 圈速 ${loops}/s 远超 fps ${fps} —— 又退回忙等，别用 CPU 数字掩盖它"
-  _log "gate: 不通过 cpu=${cpu}% motion=${m_changed}(${m_pct}%) 圈速=${loops:-?} busy=${busy} 显示=${disp}"
+  _log "gate: 不通过 cpu=${cpu}% 线=${cpu_line}% 档=${disp} motion=${m_changed}(${m_pct}%) 圈速=${loops:-?} busy=${busy}"
   return 4
 }
 
@@ -620,6 +644,10 @@ cmd_arm() {
     cmd_stop
     return 5
   fi
+  if (( rc == 6 )); then
+    print -u2 "✗ 前置不满足（屏上不是单实例）⇒ **不停面板**：停掉受管那只只会把多余的那只留下当宠物。清掉多余的实例再 arm。"
+    return 6
+  fi
   print -u2 "✗ 门槛不达标 ⇒ 立刻停回去（不让笔记本白烧电）；修好再 arm"
   cmd_stop
   return 4
@@ -640,6 +668,7 @@ case "${1:-status}" in
     print "  gate/arm：判据① 60s 稳态 CPU <5%；判据② 外部可观测的「画面真在动」（连抓窗口位图比像素）"
     print "           屏幕睡着/锁屏时判据②不可判读 ⇒ gate 退出 5、arm 停回去（--skip-motion 才明确只验 CPU）"
     print "退出码: 0 正常 / 1 未运行 / 2 用法错 / 3 没装 / 4 门槛不达标或操作失败 / 5 证据不全（不可判读）"
+    print "        / 6 前置不满足（屏上不是单实例）—— 不判门槛、不停面板"
     ;;
   *)
     print -u2 "xiaoccctl: 不认得的子命令 '$1'"

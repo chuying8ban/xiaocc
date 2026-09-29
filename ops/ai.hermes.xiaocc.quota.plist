@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- 额度采集：15 分钟一拍，落 ~/.xiaocc/quota.json（采集器自己原子写 + 0600）。
+       独立于面板：**故意不做** KeepAlive.OtherJobEnabled 依赖 —— 采集器挂了不许牵连桌宠，
+       反过来面板没跑也不该让额度变陈旧（用户可能只想看额度）。
+       一次性作业，故意不给 KeepAlive：失败就等下一拍，别在 15 分钟里反复重试烧网络。 -->
+  <key>Label</key>
+  <string>ai.hermes.xiaocc.quota</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/a29285/ChenC/项目/xiaocc/.venv/bin/python</string>
+    <string>-m</string>
+    <string>xiaocc.quota</string>
+    <string>refresh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/a29285/ChenC/项目/xiaocc</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PYTHONUNBUFFERED</key>
+    <string>1</string>
+  </dict>
+  <!-- 15 分钟 < 采集器自己的 30 分钟陈旧阈值 ⇒ 漏一拍还在保鲜期内，连漏两拍面板才开始说「陈旧」 -->
+  <key>StartInterval</key>
+  <integer>900</integer>
+  <key>RunAtLoad</key>
+  <true/>
+  <!-- 无界面轮询作业：Background 才对（Interactive 是给驱动定时器/UI 的作业用的） -->
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+  <key>ThrottleInterval</key>
+  <integer>60</integer>
+  <key>StandardOutPath</key>
+  <string>/Users/a29285/Library/Logs/xiaocc/quota.out.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/a29285/Library/Logs/xiaocc/quota.err.log</string>
+</dict>
+</plist>
