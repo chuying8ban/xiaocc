@@ -479,6 +479,7 @@ def parse_anchor(
     *,
     margin: float = ANCHOR_MARGIN,
     top_offset: float = ANCHOR_TOP_OFFSET,
+    usable: Rect | None = None,
 ) -> Rect:
     """配置里的「初始停靠点」→ 屏幕上的窗口矩形（返回值一定不越界）。
 
@@ -490,6 +491,13 @@ def parse_anchor(
     ``size`` 是窗口的 ``(宽, 高)``，一般由 :func:`window_size_for` 算出来。
     ``text`` 为 ``None`` 或空串时按默认的 ``"top-right"``；方位名大小写与
     首尾空白都不敏感。窗口比屏幕还大也不会抛异常（夹不进去就贴屏幕左上角）。
+
+    ``usable`` 是**实际可用区**（macOS 的 ``visibleFrame``：已让开菜单栏与 Dock）。
+    有图形会话时必须传 —— 只按整屏算，``at=bottom-*`` 会把窗口送进 Dock 带
+    （实测底部让出 90px），而 Dock 层级比桌宠窗口高，角色就埋在 Dock 底下点不到了。
+    底部两档按 ``usable.bottom`` 留白；顶部那两档仍用手调的 :data:`ANCHOR_TOP_OFFSET`
+    （不为别的，只为不改变现有部署位置）；最后统一夹进 ``usable``。
+    没有图形会话（纯几何测试）时不用传，退回整屏口径。
     """
     name = "top-right" if text is None else text.strip().lower()
     if not name:
@@ -501,9 +509,11 @@ def parse_anchor(
     elif name == "top-left":
         x, y = screen.x + margin, screen.y + top_offset
     elif name == "bottom-right":
-        x, y = screen.right - width - margin, screen.bottom - height - margin
+        bottom = usable.bottom if usable is not None else screen.bottom
+        x, y = screen.right - width - margin, bottom - height - margin
     elif name == "bottom-left":
-        x, y = screen.x + margin, screen.bottom - height - margin
+        bottom = usable.bottom if usable is not None else screen.bottom
+        x, y = screen.x + margin, bottom - height - margin
     elif name == "center":
         x = screen.x + (screen.width - width) / 2.0
         y = screen.y + (screen.height - height) / 2.0
@@ -516,7 +526,7 @@ def parse_anchor(
                 + '，或 "x,y" 形式的屏幕坐标（例如 "120,300"）'
             )
         x, y = point
-    return Rect(x, y, width, height).clamped_into(screen)
+    return Rect(x, y, width, height).clamped_into(usable if usable is not None else screen)
 
 
 # —— 颜色 ————————————————————————————————————————————————————————————————————

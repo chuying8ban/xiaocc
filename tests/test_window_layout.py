@@ -258,6 +258,40 @@ def _anchor(text: str | None) -> wl.Rect:
     return wl.parse_anchor(text, SCREEN, (_W, _H))
 
 
+def test_parse_anchor_respects_usable_area():
+    """自己挑的位置必须落在「可用区」里 —— 只按整屏算，at=bottom-* 会掉进 Dock 带。
+
+    实测（macOS visibleFrame）：1512x982 上底部让出 90px(Dock)、顶部 33px(菜单栏)。
+    这里不依赖真屏幕，直接把可用区当参数喂进去。
+    """
+    usable = wl.Rect(0, 33, 1512, 859)  # 顶部 33 菜单栏、底部到 892
+    size = (160.0, 194.0)
+    bottom_right = wl.parse_anchor("bottom-right", SCREEN, size, usable=usable)
+    assert bottom_right.bottom == pytest.approx(usable.bottom - wl.ANCHOR_MARGIN)
+    assert bottom_right.bottom <= usable.bottom
+    for name in wl.ANCHOR_CHOICES:
+        rect = wl.parse_anchor(name, SCREEN, size, usable=usable)
+        assert rect.y >= usable.y, name
+        assert rect.bottom <= usable.bottom, name
+        assert rect.x >= usable.x and rect.right <= usable.right, name
+
+
+def test_parse_anchor_without_usable_keeps_old_behaviour():
+    """没给可用区（纯几何测试/无图形会话）时退回整屏口径 —— 老行为不许变。"""
+    size = (160.0, 194.0)
+    assert wl.parse_anchor("bottom-right", SCREEN, size).bottom == pytest.approx(
+        SCREEN.bottom - wl.ANCHOR_MARGIN
+    )
+    assert wl.parse_anchor("top-right", SCREEN, size).y == pytest.approx(wl.ANCHOR_TOP_OFFSET)
+
+
+def test_parse_anchor_xy_is_clamped_into_usable():
+    """绝对坐标写过头时也要夹进可用区（不能跑到屏幕外，也不能压在 Dock 底下）。"""
+    usable = wl.Rect(0, 33, 1512, 859)
+    rect = wl.parse_anchor("120,5000", SCREEN, (160.0, 194.0), usable=usable)
+    assert rect.bottom <= usable.bottom
+
+
 @pytest.mark.parametrize(
     "name,expected",
     [

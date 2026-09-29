@@ -149,6 +149,22 @@ class _Space:
     def screen(self) -> wl.Rect:
         return wl.Rect(0.0, 0.0, self.width, self.height)
 
+    @property
+    def usable(self) -> wl.Rect | None:
+        """可用区（macOS 的 ``visibleFrame``）：已经让开了菜单栏和 Dock。
+
+        **自己挑的位置**（命令行 ``at=`` / 默认右上角）要落在里面 —— 否则
+        ``at=bottom-right`` 会把窗口送进 Dock 带（实测底部让出 90px），而 Dock 的
+        窗口层级比我们高，角色就埋在 Dock 底下点不到了。用户**手拖**的位置不在此列：
+        那是用户的意图，不该被我们二次夹取。
+        """
+        ns = NSScreen.mainScreen()
+        if ns is None:
+            return None
+        vis = ns.visibleFrame()
+        rect = self.to_local_rect(vis)
+        return rect if rect.width > 0 and rect.height > 0 else None
+
     def to_local_point(self, point: Any) -> wl.Point:
         return wl.Point(point.x - self.origin_x, self.origin_y + self.height - point.y)
 
@@ -690,7 +706,7 @@ class AppKitBackend(Backend):
             rect = wl.Rect(*self._saved_anchor, width, height).clamped_into(space.screen)
             log.info("按上次拖动的锚点启动：(%d,%d)", rect.x, rect.y)
             return rect
-        return wl.parse_anchor(self._at, space.screen, (width, height))
+        return wl.parse_anchor(self._at, space.screen, (width, height), usable=space.usable)
 
     def _set_window_rect(self, rect: wl.Rect, *, reason: str) -> None:
         """**所有**改窗口位置的地方都走这里，便于留痕与纠偏。

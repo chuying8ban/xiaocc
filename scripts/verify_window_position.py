@@ -29,6 +29,22 @@ ROOT = Path(__file__).resolve().parents[1]
 PY = str(ROOT / ".venv/bin/python")
 SCREEN_W, SCREEN_H = 1512.0, 982.0
 
+#: 可用区（macOS ``visibleFrame``：已让开菜单栏与 Dock）。自己挑的位置必须落在里面 ——
+#: 只按整屏算的话 ``at=bottom-*`` 会把窗口送进 Dock 带（实测底部让出 90px），
+#: 而 Dock 的层级比桌宠窗口高，角色就埋在 Dock 底下点不到。
+USABLE_TOP, USABLE_BOTTOM, USABLE_LEFT, USABLE_RIGHT = 0.0, SCREEN_H, 0.0, SCREEN_W
+try:
+    from AppKit import NSScreen as _NSScreen
+
+    _frame = _NSScreen.mainScreen().frame()
+    _vis = _NSScreen.mainScreen().visibleFrame()
+    USABLE_TOP = round(_frame.size.height - (_vis.origin.y + _vis.size.height))
+    USABLE_BOTTOM = round(_frame.size.height - _vis.origin.y)
+    USABLE_LEFT = round(_vis.origin.x)
+    USABLE_RIGHT = round(_vis.origin.x + _vis.size.width)
+except Exception as exc:  # noqa: BLE001 —— 拿不到就退回整屏口径，脚本照样能跑
+    print(f"（读不到 visibleFrame，退回整屏口径：{exc}）")
+
 #: 把锚点文件指到一个**不存在的**路径：这个脚本验的是 `at=`/默认角的算术，
 #: 而用户拖动会把锚点落盘（见 scripts/verify_anchor.py），残留的锚点文件会让
 #: 「默认右上角」那一例随机失败 —— 那不是回归，是测试自己没隔离。
@@ -45,10 +61,11 @@ for _stale in (ANCHOR_ENV["XIAOCC_ANCHOR_FILE"], ANCHOR_ENV["XIAOCC_PROBE_FILE"]
 CASES: list[tuple[str, str, list[str], int, tuple[float, float] | None]] = [
     ("默认（不传选项）", "default-top-right", [], 0, (SCREEN_W - 160 - 28, 96.0)),
     ("at=top-left", "at-top-left", ["--backend-opt", "at=top-left"], 0, (28.0, 96.0)),
+    # 底部两档按**可用区**底留白（不是整屏底），见 USABLE_* 那段注释
     ("at=bottom-left", "at-bottom-left", ["--backend-opt", "at=bottom-left"], 0,
-     (28.0, SCREEN_H - 194 - 28)),
+     (28.0, USABLE_BOTTOM - 194 - 28)),
     ("at=bottom-right", "at-bottom-right", ["--backend-opt", "at=bottom-right"], 0,
-     (SCREEN_W - 160 - 28, SCREEN_H - 194 - 28)),
+     (SCREEN_W - 160 - 28, USABLE_BOTTOM - 194 - 28)),
     ("at=center", "at-center", ["--backend-opt", "at=center"], 0,
      ((SCREEN_W - 160) / 2, (SCREEN_H - 194) / 2)),
     ("at=120,300（绝对坐标）", "at-xy", ["--backend-opt", "at=120,300"], 0, (120.0, 300.0)),
@@ -120,6 +137,16 @@ def _run_window_case(case, capture: bool):
         return False, "日志里没有「AppKit 窗口就绪」那一行"
     x, y = float(match.group(3)), float(match.group(4))
     exact = abs(x - want_xy[0]) < 0.6 and abs(y - want_xy[1]) < 0.6
+    # 不变量：任何「自己挑的」位置都必须落在可见区内（研究员那条 —— 光看期望值相等不够，
+    # 期望值本身可能就是在整屏口径下写错的）
+    outside = (
+        x < USABLE_LEFT - 1
+        or y < USABLE_TOP - 1
+        or x + 160 > USABLE_RIGHT + 1
+        or y + 194 > USABLE_BOTTOM + 1
+    )
+    if outside:
+        exact = False
 
     seen = "没抓到窗口"
     if ours:
@@ -136,7 +163,11 @@ def _run_window_case(case, capture: bool):
             seen += f" · 抓到 {len(ours)} 个窗口 [{frames}]"
     if shot_done:
         seen += f" · 已抓图 11-{slug}.png"
-    return exact, (f"布局 ({x:.0f},{y:.0f}) 期望 ({want_xy[0]:.0f},{want_xy[1]:.0f}) · {seen}")
+    note = ""
+    if outside:
+        note = (f" · ⚠ 出可见区（可见区 {USABLE_LEFT:.0f},{USABLE_TOP:.0f}"
+                f" → {USABLE_RIGHT:.0f},{USABLE_BOTTOM:.0f}）")
+    return exact, (f"布局 ({x:.0f},{y:.0f}) 期望 ({want_xy[0]:.0f},{want_xy[1]:.0f}) · {seen}{note}")
 
 
 def main() -> int:
