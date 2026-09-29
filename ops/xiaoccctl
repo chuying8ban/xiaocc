@@ -235,7 +235,13 @@ doc = {
     "window": window,
     "last_error": last.strip() or None,
 }
-pathlib.Path(state).write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+# 原子写：同目录唯一临时名 + os.replace（直写会在并发/中途被杀时留下半截 JSON —— 面板那边刚踩过同款抢跑）
+import os as _os, tempfile as _tf
+_p = pathlib.Path(state)
+_fd, _tn = _tf.mkstemp(prefix=_p.name + ".", suffix=".tmp", dir=str(_p.parent))
+with _os.fdopen(_fd, "w") as _fh:
+    _fh.write(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+_os.replace(_tn, _p)
 PYEOF
   return 0
 }

@@ -200,3 +200,10 @@ A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 过�
 可调：`XIAOCC_RV_WAIT_MAX`（默认 7200s）/`XIAOCC_RV_POLL`（10s）/`XIAOCC_RV_SECS`（60s）；
 **测试接缝** `XIAOCC_RV_LOGDIR`（沙箱目录）+ `XIAOCC_RV_FORCE_AWAKE=1` + 桩 `xiaoccctl`
 —— 三条分支（通过/不通过/判不了）都用桩在沙箱里逐条验过，含「真删掉欠账标记」那一条。
+
+### 一条硬约束：别把窗口 level 提到菜单栏之上
+
+`appkit.py` 用整屏 frame（`mathY=0` 数学上合法），顶边实测 `y=35 ≥ 菜单栏 33` 靠的是 **AppKit 自己的约束**，
+不是我们的 clamp（@coder 实测结论）。所以：**任何人调窗口 `level` 时都不许越过菜单栏那一层** ——
+一旦提高，这层保护就没了，桌宠会盖住菜单栏。真要钉死得把可见区（`visibleFrame`）喂给几何层做夹取，
+那是改交互语义，改之前先说。

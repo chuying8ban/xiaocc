@@ -87,7 +87,12 @@ doc.update({
     "note": note.strip() or None,
 })
 doc["samples"] = (doc.get("samples") or [])[-9:] + [{"ts": doc["ts"], "cpu": cpu, "streak": doc["streak"], "pid": doc["pid"]}]
-path.write_text(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+# 原子写：同目录唯一临时名 + os.replace（直写在中途被杀/并发时留半截 JSON）
+import os as _os, tempfile as _tf
+_fd, _tn = _tf.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+with _os.fdopen(_fd, "w") as _fh:
+    _fh.write(json.dumps(doc, ensure_ascii=False, indent=2) + "\n")
+_os.replace(_tn, path)
 PYEOF
 }
 
