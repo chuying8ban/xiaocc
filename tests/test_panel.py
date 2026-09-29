@@ -154,6 +154,25 @@ def test_user_visible_strings_in_code_carry_no_markdown() -> None:
     assert not offenders, "会原样上屏的字符串里有 Markdown：\n" + "\n".join(offenders)
 
 
+def test_short_home_abbreviates_paths_in_page_data() -> None:
+    """页面数据里的 `$HOME` 一律缩成 `~`（页脚与账本「库」行显示的是绝对路径）。
+
+    这条是重拍实拍时抓出来的：那两行把 `/Users/<用户名>/…` 直接印在页面上，截图一进公开仓库
+    就是真用户名。`~` 既短又不泄露，且只动显示用的页面数据（诊断日志仍要真路径）。
+    """
+    home = str(Path.home())
+    assert render._short_home(f"{home}/.hermes/state.db") == "~/.hermes/state.db"
+    # 递归：嵌套 dict / list 里的路径也要缩写；不是 home 开头的（如替身目录）原样保留
+    payload = {
+        "meta": {"path": f"{home}/.xiaocc/quota.json", "n": 3},
+        "ledger": {"default_profile": {"path": f"{home}/.hermes/state.db"}, "dbs": [f"{home}/a", "/tmp/b"]},
+    }
+    got = render._short_home(payload)
+    assert got["meta"] == {"path": "~/.xiaocc/quota.json", "n": 3}
+    assert got["ledger"]["default_profile"]["path"] == "~/.hermes/state.db"
+    assert got["ledger"]["dbs"] == ["~/a", "/tmp/b"]
+
+
 def test_device_block_says_collecting_when_the_baseline_is_too_young() -> None:
     """两种空必须分开写：**「等一秒就有」**（采集中）不是「未取到」。
 

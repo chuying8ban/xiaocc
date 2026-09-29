@@ -92,7 +92,7 @@ class Report:
         self.fail_count = 0
 
     def section(self, title: str) -> None:
-        print("")
+        print()
         print(f"== {title} ==")
 
     def ok(self, path: str, lineno: int, message: str) -> None:
@@ -108,7 +108,7 @@ class Report:
             print(f"     | {source.strip()}")
 
     def summary(self) -> int:
-        print("")
+        print()
         print("== 小结 ==")
         print(f"OK {self.ok_count} 条，FAIL {self.fail_count} 条")
         if self.fail_count:

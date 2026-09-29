@@ -63,6 +63,23 @@ PET_FIELDS = (
 _DEVICE_SAMPLER = device_mod.Sampler()
 
 
+def _short_home(value):
+    """把上屏文本里的 `$HOME` 缩成 `~`（递归走 dict/list/str，只动值不动键）。
+
+    为什么要：页脚与账本「库」那行显示的是**绝对路径**，`/Users/<你的名字>/…` 会跟着截图进公开
+    仓库（今天重拍实拍就是这么带出来的），`~` 谁都读得懂、也不泄露用户名。日志文件那两处不吃
+    这个函数（诊断要真路径），只作用在**页面数据**上。
+    """
+    home = str(Path.home())
+    if isinstance(value, str):
+        return "~" + value[len(home):] if value.startswith(home + "/") else value
+    if isinstance(value, dict):
+        return {k: _short_home(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_short_home(v) for v in value]
+    return value
+
+
 def _device_snapshot(*, wait: bool = True) -> Any:
     """采一次设备状态（失败返回 ``None``）。设备卡与**气泡预览共用同一刻**的这份快照。"""
     try:
@@ -147,6 +164,8 @@ def build_payload(
     from ..quota.base import now_iso as _now_iso
 
     report, meta = load_quota(Path(quota_path))
+    # 上屏前一次缩写（页脚 + 账本「库」行都显示绝对路径）
+    report, meta = _short_home(report), _short_home(meta)
     described = settings_store.describe(settings_path)
     dev = _device_snapshot(wait=device_wait)
     action = str(described.get("click_action") or settings_store.DEFAULTS["click_action"])
