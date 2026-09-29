@@ -649,5 +649,24 @@ def test_all_action_survives_missing_device():
     assert any("¥75.00" in "".join(c) for c in cands)
 
 
+def test_snapshot_payload_has_no_dead_keys(tmp_path: Path):
+    """交付面上只放**有人读**的字段：按模型明细不进 payload（@lead 拍板删）。
+
+    用户 2026-09-29 的要求是「不要有功能不明的功能」——面板和 CLI 都不读 `models`，
+    写进 quota.json 就只是没人用的死数据。要看明细用 `ledger.scan_db()`（内部仍给）。
+    """
+    make_db(tmp_path / "state.db", [row("m", 3, 0.5, "estimated")])
+    prof = tmp_path / "profiles" / "a"
+    prof.mkdir(parents=True)
+    make_db(prof / "state.db", [row("m", 1, 0.25, "estimated")])
+    books = ledger.snapshot(base.default_state_dbs(tmp_path))
+    for section in (books["default_profile"], books["all_profiles"]):
+        assert "models" not in section and "truncated" not in section
+    assert books["default_profile"]["calls"] == 3
+    assert books["all_profiles"]["calls"] == 4 and books["all_profiles"]["cost_usd"] == 0.75
+    assert ledger.scan_db(prof / "state.db")["models"][0]["model"] == "m"  # 内部仍给明细
+    assert ledger.snapshot([])["default_profile"]["calls"] == 0  # 一个库都没有也不炸
+
+
 def test_default_quota_path_is_under_xiaocc():
     assert DEFAULT_QUOTA_PATH.name == "quota.json" and DEFAULT_QUOTA_PATH.parent.name == ".xiaocc"

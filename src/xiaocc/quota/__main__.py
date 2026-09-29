@@ -45,13 +45,6 @@ def _print_ledger(books: dict[str, Any]) -> None:
             f"{_fmt_money(section['cost_usd'], section['cost_known'])}{note}"
             f" ｜ 输入 {section['input_tokens']:,} tok · 输出 {section['output_tokens']:,} tok"
         )
-    for model in (books.get("all_profiles") or {}).get("models", [])[:6]:
-        unpriced = model.get("unpriced_calls") or 0
-        note = f"（{unpriced:,} 次未计价）" if unpriced else ""
-        print(
-            f"    - {model['model']:<28} {model['calls']:>7,} 次  "
-            f"{_fmt_money(model['cost_usd'], model['cost_known'])}{note}"
-        )
 
 
 def _show(path: Path, as_json: bool) -> int:

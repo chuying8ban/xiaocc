@@ -86,4 +86,7 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except BrokenPipeError:  # `| head` 掐断是正常用法，别甩一段 traceback
+        raise SystemExit(0) from None

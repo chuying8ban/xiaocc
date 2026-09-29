@@ -111,6 +111,24 @@ def scan_db(path: Path, *, window_days: int = 30, now: datetime | None = None) -
     }
 
 
+def _summary(models: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
+    """**交付面**上那一节的字段 —— 只放有人读的东西。
+
+    `models`（按模型明细）留在 :func:`scan_db` 里做内部聚合用，**不进 payload**：
+    面板和 CLI 都不读它，写进 `quota.json` 就只是没人用的死数据（用户 2026-09-29 的
+    「不要有功能不明的功能」，@lead 拍板删）。谁要按模型看，`ledger.scan_db()` 直接给。
+    """
+    return {
+        "calls": sum(m["calls"] for m in models),
+        "input_tokens": sum(m["input_tokens"] for m in models),
+        "output_tokens": sum(m["output_tokens"] for m in models),
+        "cost_usd": _sum_cost(models),
+        "cost_known": any(m["cost_known"] for m in models),
+        "unpriced_calls": sum(m["unpriced_calls"] for m in models),
+        **extra,
+    }
+
+
 def _sum_cost(models: list[dict[str, Any]]) -> float | None:
     """合计金额 = 已计价模型的合计；**一个已计价的都没有才是「未知」**。
 
@@ -146,31 +164,23 @@ def _merge(scans: list[dict[str, Any]]) -> dict[str, Any]:
         acc["cost_usd"] = cost if acc["cost_known"] else None
         models.append(acc)
     models.sort(key=lambda m: (-m["calls"], m["model"]))
-    return {
-        "readable": any(s["readable"] for s in scans),
-        "note": None,
-        "calls": sum(m["calls"] for m in models),
-        "input_tokens": sum(m["input_tokens"] for m in models),
-        "output_tokens": sum(m["output_tokens"] for m in models),
-        "cost_usd": _sum_cost(models),
-        "cost_known": any(m["cost_known"] for m in models),
-        "unpriced_calls": sum(m["unpriced_calls"] for m in models),
-        "models": models,
-        "dbs": [s["path"] for s in scans if s["readable"]],
-    }
+    return _summary(
+        models,
+        readable=any(s["readable"] for s in scans),
+        note=None,
+        dbs=[s["path"] for s in scans if s["readable"]],
+    )
 
 
 def snapshot(
-    state_dbs: list[Path], *, window_days: int = 30, now: datetime | None = None, top: int = 12
+    state_dbs: list[Path], *, window_days: int = 30, now: datetime | None = None
 ) -> dict[str, Any]:
-    """返回面板要的两组数：默认库一份、全部库合并一份。**永不抛。**"""
+    """返回面板要的两组数：默认库一份、全部库合并一份。**永不抛**，也**不带按模型明细**
+    （没人读的字段不进交付面，见 :func:`_summary`）。"""
     scans = [scan_db(p, window_days=window_days, now=now) for p in state_dbs]
-    default = scans[0] if scans else _empty_scan(Path("state.db"), "没有配置账本")
-    allscope = _merge(scans)
-    for section in (default, allscope):
-        if len(section["models"]) > top:
-            section["models"] = section["models"][:top]
-            section["truncated"] = True
+    first = scans[0] if scans else _empty_scan(Path("state.db"), "没有配置账本")
+    default = _summary(first["models"], path=first["path"], readable=first["readable"],
+                       note=first["note"])
     return {
         "window_days": window_days,
         "generated_at": now_iso(),
@@ -178,5 +188,5 @@ def snapshot(
         "db_count": len(state_dbs),
         "db_profiles": [db_label(p) for p in state_dbs],
         "default_profile": default,
-        "all_profiles": allscope,
+        "all_profiles": _merge(scans),
     }
