@@ -33,6 +33,12 @@ import sys
 # 说成了「人一笔笔画出来的」，属于承诺超出事实，所以按子串命中即 FAIL。
 BAD_WORDS = ("自绘", "纯手绘", "手工绘制")
 
+#: 行里同时出现这些**说规则**的用语 ⇒ 它是在讲"不许这么写"，不是在声称自己是这么来的
+#: （实拍：`docs/RELEASE-CHECKLIST.md` 写"① 来源声明禁用措辞（自绘/纯手绘/手工绘制）"，
+#:  朴素写法会把它自己判红 —— 守卫把描述守卫的文档判红，是最容易被关掉的那种假红）。
+#: 只做**同一条行内**豁免，且要打印出来（不许静默放过）。
+RULE_WORDS = ("禁用", "不许", "禁止", "别用", "不要用", "放回")
+
 # 判据②：哪些算「声明行」。行里出现这些用语之一，就把该行的反引号 token 当作
 # 被点名的路径；另外任何行只要有 Markdown 链接目标 ](target)，target 也算点名。
 DECLARE_WORDS = (
@@ -227,8 +233,13 @@ def check_wording(root: str, report: Report) -> None:
         hits: list[tuple[int, str, tuple[str, ...]]] = []
         for lineno, text in enumerate(lines, start=1):
             found = tuple(word for word in BAD_WORDS if word in text)
-            if found:
-                hits.append((lineno, text, found))
+            if not found:
+                continue
+            if any(word in text for word in RULE_WORDS):
+                # 讲规则的行：不是声明，豁免，但要留痕（看得见，才能判断豁免是否被滥用）
+                report.ok(rel(root, path), lineno, "说规则的行，豁免：" + "、".join(found))
+                continue
+            hits.append((lineno, text, found))
         if not hits:
             report.ok(rel(root, path), 0, f"{len(lines)} 行，无禁用措辞")
             continue
