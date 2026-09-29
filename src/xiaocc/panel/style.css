@@ -1,0 +1,111 @@
+/* 小cc 面板。两套皮肤共用一个 DOM：night（夜航仪表，默认）/ paper（对账单）。
+   配色直接取小cc 自己的调色板：#6FD3E8 屏光、#FFC24B 工具橙、#5BD08A 绿、#F2665E 红、
+   #F4EFE6 纸底、#2B2E3A 墨 —— 网页与桌宠同一套视觉，不另起一套。
+   数据来自 ~/.xiaocc/quota.json（采集器 15min 一拍）与桌宠自证据 ~/.xiaocc/probe.json。 */
+:root{
+  --cyan:#6FD3E8; --orange:#FFC24B; --green:#5BD08A; --red:#F2665E;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  --serif:ui-serif,"New York","Songti SC",Georgia,serif;
+  --r:10px;
+}
+html[data-theme="night"]{
+  --bg:#0B0D11; --win:#14161C; --bar:#1B1E26; --sunk:#171A21; --chip:rgba(111,211,232,.06);
+  --ink:#E8EAF0; --ink2:#8A90A0; --faint:#5C6273; --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
+  --numfont:var(--mono); --shadow:0 30px 80px rgba(0,0,0,.55); --winline:1px solid var(--line2); --rad:14px;
+}
+html[data-theme="paper"]{
+  --bg:#DED7C9; --win:#F4EFE6; --bar:#EDE7DB; --sunk:rgba(43,46,58,.04); --chip:rgba(255,255,255,.55);
+  --ink:#2B2E3A; --ink2:#5A6070; --faint:#7C828E; --line:rgba(43,46,58,.14); --line2:rgba(43,46,58,.28);
+  --numfont:var(--serif); --shadow:0 24px 60px rgba(43,46,58,.28); --winline:1px solid rgba(43,46,58,.10); --rad:4px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);font:400 13px/1.55 -apple-system,"SF Pro Text",system-ui,sans-serif;color:var(--ink);
+     display:flex;justify-content:center;align-items:flex-start;padding:0}
+.win{width:100%;max-width:560px;background:var(--win);border:var(--winline);border-radius:var(--rad);overflow:hidden;
+     box-shadow:var(--shadow);display:flex;flex-direction:column}
+/* 注意：**别**给 .win 加 min-height:100vh —— 窗口高度是按 document.scrollHeight 自适应的，
+   100vh 会让短页面（设置页）量出自己的视口高度、于是永远缩不下去，页脚下面留一大片空白。 */
+html[data-theme="night"] .win{background:var(--win)}
+/* 顶栏 */
+.bar{display:flex;align-items:center;gap:9px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--bar)}
+html[data-theme="paper"] .bar{background:transparent;border-bottom:1px solid var(--line)}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--green)}
+html[data-theme="night"] .dot{box-shadow:0 0 8px var(--green)}
+.bar h1{margin:0;font:600 13px/1 ui-serif,"Songti SC",serif;letter-spacing:.02em}
+html[data-theme="night"] .bar h1{font-family:-apple-system,"SF Pro Text",sans-serif}
+.bar .sub{color:var(--faint);font:400 11px/1 var(--mono)}
+.bar .spacer{flex:1}
+button.tool{border:1px solid var(--line2);background:transparent;color:var(--ink2);border-radius:7px;padding:5px 10px;
+     font:500 11px/1 -apple-system;cursor:pointer;white-space:nowrap}
+button.tool:hover{color:var(--ink);border-color:var(--cyan)}
+html[data-theme="paper"] button.tool{border-radius:3px}
+/* 区段 */
+section{padding:16px}
+section+section{border-top:1px solid var(--line)}
+.label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:12px;display:flex;gap:8px;align-items:center}
+html[data-theme="paper"] .label{color:var(--ink2);font-weight:600}
+.label .tag{margin-left:auto;letter-spacing:0;text-transform:none;font:400 10px/1 var(--mono);color:var(--faint);
+     border:1px solid var(--line2);border-radius:20px;padding:3px 7px}
+html[data-theme="paper"] .label .tag{border-radius:2px}
+/* 主数字 */
+.hero{display:flex;align-items:flex-end;gap:12px}
+.hero .num{font:600 46px/1 var(--numfont);letter-spacing:-.02em}
+html[data-theme="night"] .hero .num{background:linear-gradient(180deg,#fff,#B9C2D6);-webkit-background-clip:text;background-clip:text;color:transparent}
+html[data-theme="paper"] .hero .num{font-weight:400;font-size:52px}
+.hero .cur{font:500 14px/1 var(--mono);color:var(--cyan);padding-bottom:6px}
+html[data-theme="paper"] .hero .cur{color:var(--ink2)}
+.hero .split{margin-left:auto;text-align:right;font:400 11px/1.7 var(--mono);color:var(--ink2)}
+.hero .split b{color:var(--ink);font-weight:500}
+.hero .split .none{color:var(--faint)}
+.rule{height:1px;background:var(--line);margin:14px 0 4px}
+/* 服务行：名称列吃剩余宽度、金额列与链接列不参与收缩（长详情不许顶掉金额） */
+.rows{display:flex;flex-direction:column}
+.row{display:flex;align-items:flex-start;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+.row:last-child{border-bottom:0}
+.row .st{width:7px;height:7px;flex:0 0 auto;border-radius:50%;margin-top:4px}
+.st.ok{background:var(--green)}
+html[data-theme="night"] .st.ok{box-shadow:0 0 7px var(--green)}
+.st.bad{background:var(--red)}
+.st.unk{background:transparent;border:1px dashed var(--faint);width:6px;height:6px}
+html[data-theme="paper"] .st.ok{border-radius:1px;transform:rotate(45deg)}
+html[data-theme="paper"] .st.unk{background:transparent;border:1px solid var(--line2);transform:rotate(45deg)}
+.row .name{flex:1 1 auto;min-width:0;font-weight:500}
+.row .name small{display:block;color:var(--faint);font-size:10px;font-weight:400;margin-top:2px;
+     white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .val{flex:0 0 auto;max-width:46%;text-align:right;font:500 13px/1.35 var(--mono)}
+.row .val .amt{white-space:nowrap}
+.row .val .amt i{font-style:normal;font-size:10px;color:var(--faint);margin-left:3px}
+.row .val em{display:block;font:400 10px/1.5 var(--mono);font-style:normal;color:var(--faint);white-space:nowrap}
+.row .val.unk{color:var(--ink2);font-weight:400}
+.row .val .no{display:inline-block;border:1px dashed var(--line2);border-radius:20px;padding:2px 8px;font:400 11px/1.4 var(--mono)}
+.row .go{flex:0 0 auto;color:var(--cyan);text-decoration:none;font:400 10px/1 -apple-system;opacity:.8;
+     white-space:nowrap;padding-top:3px}
+html[data-theme="paper"] .row .go{color:#3E6FD9}
+.row .go:hover{opacity:1;text-decoration:underline}
+/* 分段控件 */
+.seg{display:flex;gap:6px;margin-bottom:12px}
+.seg button{border:1px solid var(--line2);background:transparent;color:var(--ink2);border-radius:7px;padding:4px 9px;
+     font:500 10.5px/1 -apple-system;cursor:pointer}
+html[data-theme="paper"] .seg button{border-radius:2px}
+.seg button.on{background:var(--sunk);color:var(--ink);border-color:var(--cyan)}
+html[data-theme="paper"] .seg button.on{background:var(--ink);border-color:var(--ink);color:var(--win)}
+/* 表 */
+table{width:100%;border-collapse:collapse;font:400 12px/1.6 var(--mono)}
+td{padding:6px 0;border-bottom:1px solid var(--line)}
+tr:last-child td{border-bottom:0}
+td.k{color:var(--ink2)}
+td.v{text-align:right;font-weight:500}
+td.v small{color:var(--faint);font-weight:400}
+td.v .unknown{color:var(--orange);font-weight:400}
+.note{color:var(--faint);font-size:10.5px;line-height:1.6;margin:10px 0 0}
+.stale{display:none;margin:0 0 12px;padding:8px 10px;border:1px solid var(--orange);border-radius:8px;
+       color:var(--orange);font-size:11px;line-height:1.5}
+.stale.on{display:block}
+/* 桌宠现状 */
+.kv{display:flex;flex-wrap:wrap;gap:8px 18px}
+.kv div{font:400 11.5px/1.5 var(--mono);color:var(--ink2)}
+.kv div b{color:var(--ink);font-weight:500}
+footer{margin-top:auto;padding:11px 16px;border-top:1px solid var(--line);background:var(--bar);display:flex;gap:10px;
+     font:400 10.5px/1.5 var(--mono);color:var(--faint)}
+html[data-theme="paper"] footer{background:transparent}
+footer .spacer{flex:1}

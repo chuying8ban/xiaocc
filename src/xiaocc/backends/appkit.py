@@ -32,9 +32,13 @@ from dataclasses import dataclass, fields, is_dataclass
 from pathlib import Path
 from typing import Any
 
+from .. import settings as settings_store
 from ..characters import Character
 from ..engine import Render
 from ..protocol import STATE_TTL, State
+from ..quota import default_quota_path
+from ..quota.badge import badge_candidates
+from ..quota.store import load as load_quota_report
 from . import appkit_art
 from . import window_layout as wl
 from .anchor_store import anchor_path as _anchor_path
@@ -67,7 +71,10 @@ try:  # PyObjC 只在真的要用这个显示层时才需要
         NSImage,
         NSLineBreakByTruncatingTail,
         NSMakeRect,
+        NSMenu,
+        NSMenuItem,
         NSMutableParagraphStyle,
+        NSObject,
         NSPanel,
         NSParagraphStyleAttributeName,
         NSScreen,
@@ -131,7 +138,14 @@ _DRAG_MAX_SLEEP = 0.004
 #: 「手停住不动的拖动」不会被误判成松手。宽度取 80ms：真实拖动的相邻事件间隔是
 #: 几毫秒量级，而窗口服务器切换按钮状态是同帧的。
 _TAP_SLOP = 3.0  #: 按下到松开的位移 ≤ 这么多像素就算「点击」，不算拖动
-_TAP_MAX_HOLD_S = 0.6  #: 按住超过这么久就不当点击
+#: 按住超过这么久就不当点击。**从 0.6 放到 1.5**（2026-09-29）：点击现在有语义了
+#: （默认弹额度条），0.6 只比双击间隔 0.5 大 0.1s —— 慢慢点一下（0.6~1.2s 很正常的手感）
+#: 以前最多「什么都不做」，现在会变成「点了没反应」。真正的分布等点击日志攒出来再定。
+_TAP_MAX_HOLD_S = 1.5
+#: 额度条/文案条这类「看一眼」的东西在这里贴几秒（不进引擎、不改 state）
+_BADGE_TTL_S = 8.0
+#: 设置文件的重读周期（只 stat 一下 mtime，变了才真读）
+_SETTINGS_POLL_S = 5.0
 _DRAG_BUTTON_UP_GRACE = 0.08
 
 _IMAGE_SUFFIXES = (".png", ".svg", ".pdf", ".tiff", ".jpg", ".jpeg")
@@ -253,6 +267,35 @@ class _PetView(NSView):
         if self._backend is not None:
             self._backend._mouse_up(event)
 
+    def rightMouseDown_(self, event):
+        """右键**显式**走自己的路：不进拖拽/tap 判定（不然右键会顺手把桌宠拖走）。"""
+        if self._backend is not None:
+            self._backend._right_mouse_down(event, view=self)
+
+    def menuForEvent_(self, event):
+        """系统默认的右键转菜单在这个无边框 + 非 key 窗口上不可靠，自己去弹。"""
+        return
+
+
+class _MenuTarget(NSObject):
+    """右键菜单的动作接收者（NSMenu 只认 ObjC target，所以得有这么个壳）。"""
+
+    def initWithBackend_(self, backend):
+        self = objc.super(_MenuTarget, self).init()  # noqa: PLW0642 - pyobjc 的 initWith… 惯用法
+        if self is None:
+            return None
+        self._backend = backend
+        return self
+
+    def openPanel_(self, _sender):
+        self._backend._open_panel()
+
+    def showBadge_(self, _sender):
+        self._backend._show_badge()
+
+    def openSettings_(self, _sender):
+        self._backend._open_settings()
+
 
 class AppKitBackend(Backend):
     """macOS 原生窗口显示层。用法：``xiaocc run --backend appkit``。
@@ -351,6 +394,18 @@ class AppKitBackend(Backend):
         self._press_at: float | None = None
         self._press_point: wl.Point | None = None
         self._press_moved = False
+        #: 上一次点击的时刻（判双击用）与设置文件的重读时刻
+        self._last_click_at = 0.0
+        self._settings_checked_at = 0.0
+        #: 当前设置（★唯一来源 ~/.xiaocc/settings.json，见 xiaocc.settings）
+        self._settings = settings_store.load()
+        self._settings_mtime: float | None = None
+        #: 额度条/文案条：文字、截止时刻、**真的画上去的那份**（自证据用，别和 caption 混）
+        self._badge_text = ""
+        self._badge_until = 0.0
+        self._badge_drawn = ""
+        self._badge_dirty = False
+        self._menu_target: Any = None
         #: 光标当前是否落在热区 —— 由 :meth:`_poll` 维护，指纹要用
         self._cursor_hot = False
         #: 事件循环的自证据：本秒累计圈数 / 上一秒结算出的圈速 / 上一圈真正睡了多久
@@ -650,6 +705,12 @@ class AppKitBackend(Backend):
             "art": self._last_art,
             #: 实际画上去的文案（不是引擎的那份原文）—— 待机时应当为空
             "caption_drawn": self._last_caption_drawn,
+            #: 单击贴上去的额度条/文案条**真的画上去了**的那份文字；没画就是空串。
+            #: 单独一个字段的理由：``caption_drawn`` 的语义被截图套件的「待机时不挂文案」断言守着，
+            #: 拿它去挂额度等于把一条早就验过的守卫悄悄废掉（同 MATCH / --linger 那两次）。
+            "badge_drawn": self._badge_drawn,
+            #: 单击小cc 时按设置做什么（badge / caption / none）—— 取自 settings.json
+            "click_action": self._click_action(),
             #: —— 状态新鲜度的自证据：doctor 从进程外判「画面是不是卡在某个状态不动」
             #: 就看这几行（典型病因：源把毫秒当秒写进 ``at``，事件于是永不过期）——
             #: 这个状态是**哪个源**说的（如 ``hermes:state.db``）；None = 还没有帧。
@@ -866,7 +927,14 @@ class AppKitBackend(Backend):
                     break
                 app.sendEvent_(event)
             self._drag_watchdog()
-            changed = self._poll()
+            # 设置重读：只 stat mtime，变了才读盘（别每圈读文件 —— 空闲 <5% 那条线）
+            if time.monotonic() - self._settings_checked_at >= _SETTINGS_POLL_S:
+                self._settings_checked_at = time.monotonic()
+                self._reload_settings()
+            # 额度条出现/消失也要重画一次（它自己带 TTL，但到点那一刻得有人触发重绘）
+            badge_dirty = self._badge_dirty
+            self._badge_dirty = False
+            changed = self._poll() or badge_dirty
             self._paint(force=changed)
             self._count_loop()
             # 漂移自检每秒最多一次（别每帧拿 frame() 去问窗口服务器）
@@ -950,6 +1018,7 @@ class AppKitBackend(Backend):
         return (
             frame.state,
             frame.caption,
+            self._badge_text if self._badge_active() else "",  # 额度条出现/消失/换字都要重画
             self._dock.state,
             self._dock.edge,
             handle,
@@ -1100,19 +1169,155 @@ class AppKitBackend(Backend):
         self.move_window_to(point.x - self._drag_offset[0], point.y - self._drag_offset[1])
 
     def _mouse_up(self, _event: Any) -> None:
+        """松手：先按拖拽收尾，再判这次是不是「点击」，是就按设置执行动作。
+
+        三种手势的语义（2026-09-29 定，@researcher 的时序论证 + @ops 的三条风险都采纳）：
+
+        * **单击** = 按设置显示（默认额度条）—— **立刻响应，不为了等双击而延迟**：
+          用户刚抱怨过卡，再叠半秒很亏。
+        * **双击**（两次点击间隔 ≤ 系统双击间隔） = 收起刚弹出的额度条 + 开控制面板。
+          第一下已经出过额度条了，第二下把它收掉，所以双击不会留下一闪的残影。
+        * **按住 > ``_TAP_MAX_HOLD_S``** = 不算点击（拖动仍然是拖动）。
+
+        判定输入（位移/按住多久/是否双击）一律进日志 —— 这条路径以前只有「结果」，
+        @ops 用合成事件测不进部署实例的按键，只能靠日志反推真实点击分布。
+        """
         if not self._dragging:
             return
-        held = None if self._press_at is None else time.monotonic() - self._press_at
-        tap = (not self._press_moved) and held is not None and held <= _TAP_MAX_HOLD_S
+        now = time.monotonic()
+        held_ms = None if self._press_at is None else (now - self._press_at) * 1000.0
+        tap = (not self._press_moved) and held_ms is not None and held_ms / 1000.0 <= _TAP_MAX_HOLD_S
         self._press_at = None
         self._press_point = None
         edge = self.end_drag()
         log.debug("拖拽结束：%s", edge)
-        if tap:
+        if not tap:
+            return
+        interval = self._double_click_interval()
+        double = (now - self._last_click_at) <= interval
+        self._last_click_at = now
+        action = "双击" if double else "单击"
+        log.info(
+            "点击桌宠：%s held=%.0fms 双击间隔=%.0fms ⇒ %s",
+            action,
+            held_ms or 0.0,
+            interval * 1000.0,
+            "收起额度条+开面板" if double else f"按设置执行 click_action={self._click_action()!r}",
+        )
+        if double:
+            self._hide_badge()
             self._open_panel()
+        else:
+            self._do_click_action()
 
-    def _open_panel(self) -> None:
-        """点一下桌宠（按下到松开没动）= 打开控制面板；已经开着就把它抬到前面。
+    def _double_click_interval(self) -> float:
+        """系统的双击间隔（这台机器实测 0.5s）。取不到就用 0.5 —— 不写死在逻辑里。"""
+        try:
+            value = float(NSEvent.doubleClickInterval())
+        except Exception:  # noqa: BLE001 - 取不到就用系统默认
+            return 0.5
+        return value if 0.1 <= value <= 2.0 else 0.5
+
+    def _click_action(self) -> str:
+        return str(self._settings.get("click_action") or "badge")
+
+    def _do_click_action(self) -> None:
+        action = self._click_action()
+        if action == "badge":
+            self._show_badge()
+        elif action == "caption":
+            self._show_badge(text=self._current_caption())
+        else:
+            self._hide_badge()
+            log.debug("单击：设置是「不显示」，什么都不做")
+
+    def _current_caption(self) -> str:
+        frame, character = self._frame, self._character
+        if frame is None or character is None:
+            return ""
+        return frame.caption or character.spec(frame.state).caption or ""
+
+    def _show_badge(self, text: str | None = None) -> None:
+        """贴一条 8 秒的额度条（或设置里选的那个动作）。不碰引擎、不改 state。"""
+        if text is None:
+            text = self._quota_badge_text()
+        self._badge_text = text
+        self._badge_until = time.monotonic() + _BADGE_TTL_S
+        self._badge_dirty = True
+        log.info("额度条：%s（%gs 后自动消失）", text, _BADGE_TTL_S)
+
+    def _hide_badge(self) -> None:
+        if self._badge_text or self._badge_drawn:
+            self._badge_text = ""
+            self._badge_until = 0.0
+            self._badge_dirty = True
+
+    def _quota_badge_text(self) -> str:
+        """额度条那行字：读一次 ``quota.json``（本地小文件，点击才读），按能放下的最长一句。"""
+        try:
+            # 路径在**调用时**解析（不是 import 时），回归脚本才能用 XIAOCC_QUOTA_FILE 指到假报告上
+            report, meta = load_quota_report(default_quota_path())
+        except Exception as exc:  # noqa: BLE001 - 读不到就如实说「未采集」
+            log.warning("读额度失败：%s", exc)
+            return "额度未采集 · 点开面板看详情"
+        for candidate in badge_candidates(report, meta):
+            if self._text_fits(candidate, self._window_local.width - wl.PAD * 0.5 - 12.0):
+                return candidate
+        candidates = badge_candidates(report, meta)
+        return candidates[0] if candidates else "额度未采集 · 点开面板看详情"
+
+    @staticmethod
+    def _text_fits(text: str, width: float) -> bool:
+        try:
+            attributes = {NSFontAttributeName: NSFont.systemFontOfSize_(11.0)}
+            return float(NSString.stringWithString_(text).sizeWithAttributes_(attributes).width) <= width
+        except Exception:  # noqa: BLE001 - 量不出来就当放得下（宁可截断也不要空着）
+            return True
+
+    def _reload_settings(self, *, force: bool = False) -> None:
+        """设置文件变了就重读（只 stat mtime，没变不读盘）。"""
+        path = settings_store.settings_path()
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            mtime = None
+        if not force and mtime == self._settings_mtime:
+            return
+        self._settings_mtime = mtime
+        before = self._click_action()
+        self._settings = settings_store.load(path)
+        after = self._click_action()
+        if force or before != after:
+            log.info("设置：click_action=%s（%s）", after, path)
+
+    def _right_mouse_down(self, event: Any, view: Any = None) -> None:
+        """右键 = 弹菜单（打开控制面板 / 显示额度 / 设置…）。
+
+        **必须早退**：右键不进 :meth:`_mouse_down` 那条 tap/drag 判定，否则右键会顺手把桌宠
+        拖走或触发贴边收展（@ops 点出来的那条）。菜单里不做「重启/退出」—— 那个要跟 launchd
+        的 KeepAlive 策略一起定（现在配的是「只在非正常退出时拉起」），没定清楚之前不摆进去。
+        """
+        menu = NSMenu.alloc().init()
+        if self._menu_target is None:
+            self._menu_target = _MenuTarget.alloc().initWithBackend_(self)
+        for title, selector in (
+            ("打开控制面板", b"openPanel:"),
+            ("显示额度", b"showBadge:"),
+            ("设置…", b"openSettings:"),
+        ):
+            item = NSMenuItem.alloc().initWithTitle_action_keyEquivalent_(title, selector, "")
+            item.setTarget_(self._menu_target)
+            menu.addItem_(item)
+        location = event.locationInWindow()
+        if view is not None:
+            menu.popUpMenuPositioningItem_atLocation_inView_(None, location, view)
+        log.info("右键菜单已弹出（打开控制面板 / 显示额度 / 设置…）")
+
+    def _open_settings(self) -> None:
+        self._open_panel(page="settings")
+
+    def _open_panel(self, *, page: str = "panel") -> None:
+        """打开控制面板（``page="settings"`` 则直接翻到设置页）；已经开着就刷新并抬到前面。
 
         面板是**独立进程**（见 :mod:`xiaocc.panel`）：这里只写一个 request 文件，不 import
         AppKit 之外的东西、不阻塞事件循环；失败也只记一行日志，绝不让桌宠跟着出事。
@@ -1120,11 +1325,11 @@ class AppKitBackend(Backend):
         try:
             from ..panel.paths import request_open
 
-            result = request_open()
+            result = request_open(page=page)
         except Exception as exc:  # noqa: BLE001 - 打不开面板不该影响桌宠本体
             log.warning("打开控制面板失败：%s", exc)
             return
-        log.info("点击桌宠 ⇒ 控制面板：%s", result)
+        log.info("打开控制面板（%s）：%s", page, result)
 
     # —— 绘制 ————————————————————————————————————————————————————————————
 
@@ -1175,7 +1380,13 @@ class AppKitBackend(Backend):
                 self._draw_art(art, self._local(body))
             else:
                 self._draw_rig(body, palette, accent, pose)
-            self._draw_caption(frame, character, accent)
+            if self._badge_active():
+                self._last_caption_drawn = ""  # 这一帧画的是额度条，文案没上屏
+                self._draw_badge(accent)
+            else:
+                # 没在画额度条 ⇒ 自证据必须清空，否则会留着上一轮那行字（判据会被它骗过）
+                self._badge_drawn = ""
+                self._draw_caption(frame, character, accent)
         finally:
             NSGraphicsContext.restoreGraphicsState()
 
@@ -1343,6 +1554,72 @@ class AppKitBackend(Backend):
         NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
             grip, grip.size.height / 2.0, grip.size.height / 2.0
         ).fill()
+
+    def _badge_active(self) -> bool:
+        """额度条此刻该不该在屏上（TTL 到了就自己消失，不用定时器）。"""
+        return bool(self._badge_text) and time.monotonic() < self._badge_until
+
+    def _draw_badge(self, accent: str) -> None:
+        """单击小cc 贴的那行字（额度条 / 状态文案）。
+
+        **走自己的通道**：只写 ``_badge_drawn``，一个字节都不碰 ``caption_drawn`` ——
+        后者被 ``appkit_screenshots.py`` 的「待机时不挂文案」断言守着（待机就 return、
+        并把它清空），拿它去挂额度等于把一条早验过的守卫悄悄废掉（今天已经栽过两次这种形状）。
+
+        画在**和文案同一条带**上、并且**占据**它：两个都在时不许叠字。这条带在窗口内，
+        所以额度条永远不出屏幕，也不用改窗口尺寸（改尺寸会碰到漂移/贴边那套几何）。
+        """
+        text = self._badge_text
+        self._badge_drawn = ""
+        if not text:
+            return
+        band = wl.Rect(
+            wl.PAD * 0.25,
+            self._window_local.height - wl.CAPTION_BAND - 1.0,
+            self._window_local.width - wl.PAD * 0.5,
+            wl.CAPTION_BAND + 4.0,
+        )
+        if self._draw_badge_text(text, accent, band):
+            self._badge_drawn = text
+
+    def _draw_badge_text(self, text: str, accent: str, band: wl.Rect) -> bool:
+        """圆角胶囊 + 居中文字，点阵化缓存（同 :meth:`_draw_caption_text` 那笔账）。"""
+        width, height = band.width, band.height
+        key = ("badge", text, accent, round(width, 1), round(height, 1))
+        image = self._bitmaps.get(key)
+        if image is None:
+            paragraph = NSMutableParagraphStyle.alloc().init()
+            paragraph.setAlignment_(NSTextAlignmentCenter)
+            paragraph.setLineBreakMode_(NSLineBreakByTruncatingTail)
+            attributes = {
+                NSFontAttributeName: NSFont.systemFontOfSize_(11.0),
+                NSForegroundColorAttributeName: self._color("#FFFFFF", 1.0),
+                NSParagraphStyleAttributeName: paragraph,
+            }
+            label = NSString.stringWithString_(text)
+
+            def paint(w: float, h: float, label: Any = label, attributes: Any = attributes) -> None:
+                capsule = NSBezierPath.bezierPathWithRoundedRect_xRadius_yRadius_(
+                    NSMakeRect(0.5, 0.5, w - 1.0, h - 1.0), h / 2.0, h / 2.0
+                )
+                self._color("#2B2E3A", 0.88).setFill()
+                capsule.fill()
+                self._color(accent, 0.9).setStroke()
+                capsule.setLineWidth_(1.0)
+                capsule.stroke()
+                label.drawInRect_withAttributes_(
+                    NSMakeRect(6.0, (h - 15.0) / 2.0, w - 12.0, 15.0), attributes
+                )
+
+            image = appkit_art.pointize((width, height), paint)
+            if image is None:
+                NSString.stringWithString_(text).drawInRect_withAttributes_(self._local(band), attributes)
+                return True
+            self._bitmaps.put(key, image)
+        image.drawInRect_fromRect_operation_fraction_(
+            self._local(band), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+        )
+        return True
 
     def _draw_caption(self, frame: Render, character: Character, accent: str) -> None:
         """底部状态文案。画在窗口内部（固定文案带），永远不出屏幕。"""

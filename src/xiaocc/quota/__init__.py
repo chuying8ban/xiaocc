@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
@@ -32,13 +33,27 @@ from .qianwen import QwenTokenPlanAdapter
 from .static import default_consoles
 
 SCHEMA = 1
-DEFAULT_QUOTA_PATH = Path.home() / ".xiaocc" / "quota.json"
+
+#: 采集结果落在哪。``XIAOCC_QUOTA_FILE`` 是**回归脚本的沙箱缝**：验证要拿一份假报告
+#: 驱动桌宠的额度条，那条路径绝不能读用户真实的 ``~/.xiaocc/quota.json``
+#: （同 anchor / probe / panel.request 那一套卫生红线）。
+ENV_QUOTA_FILE = "XIAOCC_QUOTA_FILE"
+
+
+def default_quota_path() -> Path:
+    override = os.environ.get(ENV_QUOTA_FILE)
+    return Path(override) if override else Path.home() / ".xiaocc" / "quota.json"
+
+
+DEFAULT_QUOTA_PATH = default_quota_path()
 
 __all__ = [
     "DEFAULT_QUOTA_PATH",
+    "ENV_QUOTA_FILE",
     "SCHEMA",
     "collect",
     "default_adapters",
+    "default_quota_path",
     "load",
     "refresh",
 ]

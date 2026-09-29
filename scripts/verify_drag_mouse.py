@@ -46,6 +46,9 @@ os.environ["XIAOCC_PROBE_FILE"] = str(_TMP / "probe.json")
 # 并且伪造一个「已有面板在跑」的状态文件（pid 填本进程），免得检验本身拉出一个真窗口。
 os.environ["XIAOCC_PANEL_REQUEST"] = str(_TMP / "panel.request")
 os.environ["XIAOCC_PANEL_STATE"] = str(_TMP / "panel.json")
+# 新增的三个交互要读设置、要读额度条 —— 同样不许碰用户真实的那两份文件
+os.environ["XIAOCC_SETTINGS_FILE"] = str(_TMP / "settings.json")
+os.environ["XIAOCC_QUOTA_FILE"] = str(_TMP / "quota.json")
 
 import Quartz
 
@@ -243,7 +246,11 @@ def check_drag_watchdog(backend, number: int, real_button_down) -> None:
 
 
 def check_tap_opens_panel(backend, number: int) -> None:
-    """⑦⑧ 点一下 vs 拖一把：**只有「按下到松开没动」**才该去开控制面板。
+    """⑦⑧ 单击 vs 拖一把：**只有「按下到松开没动」**才算点击（拖动绝不许触发动作）。
+
+    单击的语义在 2026-09-29 改了：单击 = 按设置显示（默认额度条），**开面板归双击/右键**。
+    所以这条判据跟着改 —— 它守的是「拖动不许被当成点击」这个反向控制，
+    以及「单击不该顺手把面板也开了」（那会和双击抢同一件事）。
 
     走的是真机同一条处理函数路径（``_mouse_down`` / ``_mouse_dragged`` / ``_mouse_up``），
     而 ``request_open`` 落的是 ``XIAOCC_PANEL_REQUEST``（临时目录）+ 状态文件里伪造的活 pid，
@@ -261,11 +268,16 @@ def check_tap_opens_panel(backend, number: int) -> None:
     center = wl.Point(real[0] + real[2] / 2, real[1] + real[3] / 2)
 
     req.unlink(missing_ok=True)
+    backend._last_click_at = 0.0
     backend._mouse_down(event_for(center, backend._window_local))
     backend.linger(0.04)
     backend._mouse_up(None)
     backend.linger(0.05)
-    _check("⑦点一下桌宠 ⇒ 请求打开控制面板", req.exists(), f"{req.name} exists={req.exists()}")
+    _check(
+        "⑦单击 ⇒ 不开面板（单击是「按设置显示」，开面板归双击）",
+        not req.exists(),
+        f"{req.name} exists={req.exists()}",
+    )
 
     req.unlink(missing_ok=True)
     backend._mouse_down(event_for(center, backend._window_local))
@@ -278,6 +290,141 @@ def check_tap_opens_panel(backend, number: int) -> None:
         not req.exists(),
         f"{req.name} exists={req.exists()}（拖动被当成点击了）",
     )
+
+
+
+
+def check_click_gestures(backend, number: int) -> None:
+    """⑨~⑭ 单击出额度 / 双击开面板 / 慢点不算点击 / 设置能换动作 / 右键不进拖拽。
+
+    为什么这几条必须走**真机同一条处理函数路径**：这三种手势是从同一串
+    ``mouseDown_/mouseUp_`` 事件上分出来的，拿「直接调 _show_badge()」去验等于验了个别的。
+    设置和额度文件都指到临时目录（见文件头），所以这里既不碰用户真实设置、也不会真拉窗口。
+    """
+    import json as _json
+
+    from xiaocc import settings as settings_store
+    from xiaocc.panel import paths
+
+    req = paths.PANEL_REQUEST
+    assert str(req).startswith(str(_TMP)), f"请求文件跑到临时目录外了：{req}"
+    paths.PANEL_STATE.write_text(
+        _json.dumps({"pid": os.getpid(), "at": time.time()}), encoding="utf-8"
+    )
+
+    real = server_rect(number)
+    assert real is not None, "窗口服务器读不到窗口"
+    center = wl.Point(real[0] + real[2] / 2, real[1] + real[3] / 2)
+
+    def click(hold: float = 0.04) -> None:
+        """按一下松开（按住 hold 秒）—— 走真机的 mouseDown_/mouseUp_ 路径。"""
+        backend._mouse_down(event_for(center, backend._window_local))
+        backend.linger(hold)
+        backend._mouse_up(None)
+        backend.linger(0.02)
+
+    def tap(gap: float = 0.0) -> None:
+        """单击（gap=0）或双击（gap=两下之间的间隔，必须 < 系统双击间隔）。"""
+        backend._last_click_at = 0.0  # 每条判据自己起手，别吃上一条的余温
+        click()
+        if gap:
+            backend.linger(gap)
+            click()
+
+    # —— ⑨ 单击（默认设置）⇒ 额度条，而且不许污染 caption_drawn ——
+    settings_store.save({"click_action": "badge"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))
+    backend._reload_settings(force=True)
+    fake_report = {
+        "schema": 1,
+        "services": [
+            {"name": "DeepSeek", "state": "ok", "items": [{"value": 75.0, "unit": "CNY"}]}
+        ],
+    }
+    Path(os.environ["XIAOCC_QUOTA_FILE"]).write_text(
+        _json.dumps(fake_report, ensure_ascii=False), encoding="utf-8"
+    )
+    req.unlink(missing_ok=True)
+    tap()
+    backend.linger(0.06)
+    probe = backend.probe()
+    _check(
+        "⑨单击 ⇒ 贴出额度条（走真事件路径）",
+        bool(probe.get("badge_drawn")) and "75.00" in str(probe.get("badge_drawn")),
+        f"badge_drawn={probe.get('badge_drawn')!r} click_action={probe.get('click_action')!r}",
+    )
+    _check(
+        "⑩额度条不占用 caption 那条带（待机时不挂文案的守卫还在）",
+        not probe.get("caption_drawn"),
+        f"caption_drawn={probe.get('caption_drawn')!r}",
+    )
+
+    # —— ⑪ 双击（两下间隔 < 系统双击间隔）⇒ 收起额度条 + 请求开面板 ——
+    req.unlink(missing_ok=True)
+    tap(gap=0.15)
+    backend.linger(0.06)
+    probe = backend.probe()
+    _check(
+        "⑪双击 ⇒ 收起额度条 + 请求打开控制面板",
+        req.exists() and not probe.get("badge_drawn"),
+        f"request={req.exists()} badge_drawn={probe.get('badge_drawn')!r}",
+    )
+
+    # —— ⑫ 按住 1.6s（>1.5s 上限）⇒ 什么都不做 ——
+    req.unlink(missing_ok=True)
+    backend._last_click_at = 0.0
+    click(1.6)
+    backend.linger(0.06)
+    probe = backend.probe()
+    _check(
+        "⑫按住 1.6s 的慢点 ⇒ 既不出额度条也不开面板",
+        (not req.exists()) and not probe.get("badge_drawn"),
+        f"request={req.exists()} badge_drawn={probe.get('badge_drawn')!r}",
+    )
+
+    # —— ⑬ 设置成「状态文案」⇒ 贴的是文案、不是余额；设成「不显示」⇒ 什么都不贴 ——
+    settings_store.save({"click_action": "caption"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))
+    backend._reload_settings(force=True)
+    backend.render(Render(event=StatusEvent(source="demo", state=State.WORKING), character=load_character()))
+    backend.linger(0.2)
+    tap()
+    backend.linger(0.06)
+    drawn = str(backend.probe().get("badge_drawn") or "")
+    _check(
+        "⑬设置=状态文案 ⇒ 贴文案（不是余额）",
+        bool(drawn) and "75.00" not in drawn,
+        f"badge_drawn={drawn!r}",
+    )
+    settings_store.save({"click_action": "none"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))
+    backend._reload_settings(force=True)
+    backend._hide_badge()
+    tap()
+    backend.linger(0.06)
+    _check(
+        "⑭设置=不显示 ⇒ 单击什么都不贴",
+        not backend.probe().get("badge_drawn"),
+        f"badge_drawn={backend.probe().get('badge_drawn')!r}",
+    )
+
+    # —— ⑮ 右键：不进拖拽（位置不动、不是在拖），菜单动作真能开面板 ——
+    before = backend._window_local
+    req.unlink(missing_ok=True)
+    backend._dragging = False
+    backend._right_mouse_down(FakeMouseEvent(center, backend._window_local), view=None)
+    backend.linger(0.05)
+    after = backend._window_local
+    _check(
+        "⑮右键不进拖拽路径（窗口不动、没在拖）",
+        (not backend._dragging) and abs(before.x - after.x) < 0.5 and abs(before.y - after.y) < 0.5,
+        f"dragging={backend._dragging} {before.x:.1f}→{after.x:.1f}",
+    )
+    backend._open_panel()
+    backend.linger(0.05)
+    _check("⑯菜单「打开控制面板」⇒ 请求到面板", req.exists(), f"{req.name} exists={req.exists()}")
+    backend._open_settings()
+    backend.linger(0.05)
+    page = _json.loads(req.read_text(encoding="utf-8")).get("page")
+    _check("⑰菜单「设置…」⇒ 请求翻到设置页", page == "settings", f"request.page={page!r}")
+
 
 
 def main() -> int:
@@ -326,6 +473,9 @@ def main() -> int:
         backend.linger(0.2)
         check_drag_watchdog(backend, number, real_button_down)
         check_tap_opens_panel(backend, number)
+        backend.render(Render(event=StatusEvent(source="demo", state=State.IDLE), character=character))
+        backend.linger(0.2)
+        check_click_gestures(backend, number)
     finally:
         backend.close()
         cursor[0] = wl.Point(-1000.0, -1000.0)

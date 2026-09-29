@@ -17,21 +17,27 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 from pathlib import Path
 
+from .. import settings as settings_store
 from ..quota import DEFAULT_QUOTA_PATH
 from ..quota import refresh as refresh_quota
 from .paths import (
     DEFAULT_PANEL_HTML,
     DEFAULT_PROBE_PATH,
+    PAGES,
     PANEL_REQUEST,
     PANEL_STATE,
     REQUEST_POLL_S,
+    read_json,
     release_spawn_lock,
 )
-from .render import build_payload, render_html, write_panel
+from .render import render_page, write_panel
+
+log = logging.getLogger("xiaocc.panel")
 
 WINDOW_SIZE = (560.0, 660.0)
 WINDOW_MIN = (420.0, 420.0)
@@ -54,25 +60,45 @@ def _load_kit():  # pragma: no cover - 需要窗口服务器
 def open_panel(
     *,
     theme: str = "night",
+    page: str = "panel",
+    settings_path: Path | None = None,
     quota_path: Path | None = None,
     probe_path: Path | None = None,
     out_path: Path | None = None,
     request_path: Path | None = None,
 ) -> int:  # pragma: no cover - 需要窗口服务器
-    """起窗口、跑事件循环，窗口关掉才返回（退出码 0）。"""
+    """起窗口、跑事件循环，窗口关掉才返回（退出码 0）。
+
+    一个进程一个窗口，页面（``panel`` / ``settings``）在上面翻 —— 不为设置再拉第二个窗口，
+    否则「一次点击开三个窗口」那个坑（子生孙）会以另一种形状回来。
+    """
     AppKit, WebKit, objc = _load_kit()
 
     quota_path = Path(quota_path or DEFAULT_QUOTA_PATH)
     probe_path = Path(probe_path or DEFAULT_PROBE_PATH)
     out_path = Path(out_path or DEFAULT_PANEL_HTML)
     request_path = Path(request_path or PANEL_REQUEST)
+    settings_path = Path(settings_path) if settings_path else settings_store.settings_path()
+    if page not in PAGES:
+        page = "panel"
 
-    def render_now() -> str:
-        """渲染当前数据 → 返回 HTML，并顺手落一份到磁盘（想在浏览器里看时直接打开）。"""
-        payload = build_payload(quota_path=quota_path, probe_path=probe_path, theme=theme)
-        html = render_html(payload)
+    def render_page_now(which: str, theme_now: str) -> str:
+        """渲染某一页 → 返回 HTML，并顺手落一份到磁盘（想在浏览器里看时直接打开）。"""
+        html = render_page(
+            which,
+            quota_path=quota_path,
+            probe_path=probe_path,
+            theme=theme_now,
+            settings_path=settings_path,
+        )
         try:
-            write_panel(out_path, quota_path=quota_path, probe_path=probe_path, theme=theme)
+            write_panel(
+                out_path,
+                quota_path=quota_path,
+                probe_path=probe_path,
+                theme=theme_now,
+                page=which,
+            )
         except OSError:
             pass
         return html
@@ -85,18 +111,24 @@ def open_panel(
             if self is None:
                 return None
             self._theme = initial_theme
+            self._page = page
             self._window = None
             self._web = None
             self._last_request = 0.0
             self._seen_request()
             return self
 
+        def render_now(self) -> str:
+            return render_page_now(self._page, self._theme)
+
         # —— 页面 → 宿主 —
         def webView_didFinishNavigation_(self, webview, _navigation):
             """页面加载完：滚动归零 + 把窗口调到内容高度。
 
-            「滚动归零」不是洁癖：不归零时实测窗口一开就停在页面中段（顶栏和主数字都在视野外），
-            看上去像渲染坏了。高度自适应是因为 WKWebView 的字体度量与浏览器不同，写死高度会裁掉底部。
+            两个坑都踩过：①不归零时窗口一开就停在页面中段（顶栏和主数字都在视野外），看上去像渲染坏了；
+            ②高度**量 documentElement.scrollHeight 是错的** —— 内容比视口短时，根元素的 scrollHeight
+            按规范返回视口高度，所以窗口只能长不能缩（短页面底下永远空一大片）。量 ``.win`` 的
+            实际高度才对，两个方向都能自适应。字体度量在 WKWebView 里与浏览器不同，写死高度会裁掉页脚。
             """
 
             def done(value, _error):
@@ -107,7 +139,9 @@ def open_panel(
                 self._fit_height(height)
 
             webview.evaluateJavaScript_completionHandler_(
-                "window.scrollTo(0, 0); Math.ceil(document.documentElement.scrollHeight)", done
+                "window.scrollTo(0, 0);"
+                " Math.ceil((document.querySelector('.win') || document.body)"
+                " .getBoundingClientRect().height)", done
             )
 
         def _fit_height(self, height: float) -> None:
@@ -136,12 +170,30 @@ def open_panel(
                 if value in ("night", "paper"):
                     self._theme = value
                     self._write_state()
+            elif action == "save":
+                # 设置页点选项 → 落盘 → 重渲染（页面自己就是「当前的被选中」那份证据）
+                self._save_settings(body)
+            elif action == "page":
+                value = body.get("value")
+                if value in PAGES:
+                    self._page = value
+                    self._write_state()
+                    self._reload()
             elif action == "close":
                 self._close()
             elif action == "open":
                 url = str(body.get("url") or "")
                 if url.startswith(("http://", "https://")):
                     AppKit.NSWorkspace.sharedWorkspace().openURL_(AppKit.NSURL.URLWithString_(url))
+
+        def _save_settings(self, body: dict) -> None:
+            updates = {k: body[k] for k in ("click_action",) if k in body}
+            try:
+                result = settings_store.save(updates, settings_path)
+                log.info("设置已保存：%s", {k: result.get(k) for k in settings_store.KNOWN_KEYS})
+            except OSError as exc:
+                log.warning("设置写盘失败：%s", exc)
+            self._reload()
 
         def windowWillClose_(self, _note):
             self._close()
@@ -160,18 +212,27 @@ def open_panel(
                 return 0.0
 
         def _request_is_new(self) -> bool:
+            """桌宠那侧写了新请求？新请求里可以带页名（右键「设置…」= 翻到设置页）。"""
             mtime = self._seen_request()
-            if mtime > self._last_request + 1e-6:
-                self._last_request = mtime
-                return True
-            return False
+            if mtime <= self._last_request + 1e-6:
+                return False
+            self._last_request = mtime
+            wanted = read_json(request_path).get("page")
+            if isinstance(wanted, str) and wanted in PAGES:
+                self._page = wanted
+            return True
 
         def _write_state(self) -> None:
             try:
                 PANEL_STATE.parent.mkdir(parents=True, exist_ok=True)
                 PANEL_STATE.write_text(
                     json.dumps(
-                        {"pid": os.getpid(), "at": time.time(), "theme": self._theme},
+                        {
+                            "pid": os.getpid(),
+                            "at": time.time(),
+                            "theme": self._theme,
+                            "page": self._page,
+                        },
                         ensure_ascii=False,
                     ),
                     encoding="utf-8",
@@ -183,7 +244,7 @@ def open_panel(
 
         def _reload(self) -> None:
             if self._web is not None:
-                self._web.loadHTMLString_baseURL_(render_now(), None)
+                self._web.loadHTMLString_baseURL_(self.render_now(), None)
 
         def _refresh_async(self) -> None:
             """刷新采集：网络那一刀放后台线程，别把窗口冻住。"""
@@ -261,7 +322,7 @@ def open_panel(
             self._write_state()
             # 先把窗口摆上屏再灌页面：页面渲染失败也别让窗口"根本没出现"
             window.orderFrontRegardless()
-            web.loadHTMLString_baseURL_(render_now(), None)
+            web.loadHTMLString_baseURL_(self.render_now(), None)
 
             AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(
                 REQUEST_POLL_S, self, "tick:", None, True

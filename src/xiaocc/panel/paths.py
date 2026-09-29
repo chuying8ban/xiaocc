@@ -126,21 +126,30 @@ def release_spawn_lock() -> None:
         pass
 
 
-def request_open(*, theme: str | None = None, spawn: bool = True) -> str:
-    """请求「把面板打开/抬到前面」。
+#: 面板里可以翻的页（右键菜单「设置…」= 请求 settings 页，一个进程一个窗口，翻页不另开窗口）
+PAGES = ("panel", "settings")
+
+
+def request_open(
+    *, theme: str | None = None, page: str = "panel", spawn: bool = True
+) -> str:
+    """请求「把面板打开/抬到前面」，`page=` 指定翻到哪一页。
 
     返回：
 
-    * ``"raised"``  —— 已经有面板开着，已请求它刷新 + 抬到前面；
+    * ``"raised"``  —— 已经有面板开着，已请求它刷新 + 抬到前面（并按需翻页）；
     * ``"spawned"`` —— 之前没有，当场拉了一个；
     * ``"failed"``  —— 请求文件写不进去，或拉进程失败。
 
     桌宠的入口只调它 —— 不 import AppKit、不阻塞、失败只记一行日志。
     """
+    if page not in PAGES:
+        page = "panel"
     try:
         PANEL_REQUEST.parent.mkdir(parents=True, exist_ok=True)
         PANEL_REQUEST.write_text(
-            json.dumps({"at": time.time(), "theme": theme}, ensure_ascii=False), encoding="utf-8"
+            json.dumps({"at": time.time(), "theme": theme, "page": page}, ensure_ascii=False),
+            encoding="utf-8",
         )
         os.chmod(PANEL_REQUEST, 0o600)
     except OSError:
