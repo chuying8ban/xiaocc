@@ -96,6 +96,32 @@ print("yes" if (d.get("dragging") is True or d.get("anchor_state") == "drag") el
 PYEOF
 }
 
+# 光标是不是停在角色身上（probe 的 ignores_mouse_events=False ⇒ 窗口接受鼠标事件 ⇒ 处于交互态）。
+# 实测（19:1x，同一个进程、逐秒窗口）：光标在远处 2.0%，移上角色后 5.0%（峰值 7.0%），移开一秒内回到 2.0%；
+# 全程 paints/s 恒 ≈15（＝fps）——所以这条 2.5× 的差别**不是绘制量**，是 hover 态本身的开销。
+# 用户把鼠标停在桌宠上看额度是很正常的用法，而 streak=3 × 5 分钟 ⇒ 能被"用户在看它"打死面板，必须跳过。
+_hot() {
+  "$PY" - "$PROBE" <<'PYEOF' 2>/dev/null || print "unknown"
+import json, sys
+try:
+    print("yes" if json.load(open(sys.argv[1])).get("ignores_mouse_events") is False else "no")
+except Exception:
+    print("unknown")
+PYEOF
+}
+
+# 真正画下去几帧/秒：probe 里的 paints_per_sec。CPU 走高的那几拍它到底是 15（＝fps，正常）
+# 还是 30+（指纹闸被打开）——这一个数就能把 5% / 1.9% 两档分开，别靠猜。
+_paints() {
+  "$PY" - "$PROBE" <<'PYEOF' 2>/dev/null || print "?"
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get("paints_per_sec"))
+except Exception:
+    print("?")
+PYEOF
+}
+
 # 进程年龄：今天最容易被忽略的一条轴 —— 同一个进程前 8 分钟能读到 ~5%、之后稳稳 ~1.9%
 # （其它条件都一样：idle、圈速 15/s）。没有这一列，事后分不清"这台机器贵"还是"这一拍还在冷启动尾巴里"。
 _pid_age_s() {
@@ -170,9 +196,9 @@ PYEOF
 }
 
 _write_state() {  # _write_state <streak> <cpu> <空串|停掉的原因> [显示状态]
-  "$PY" - "$STATE" "$LABEL" "${1:-0}" "${2:-nan}" "${3:-}" "$THRESHOLD" "$STREAK_LIMIT" "$WINDOW" "$(_pid)" "${4:-}" "$(_state_of_panel)" "$(_pid_age_s "$(_pid)")" <<'PYEOF' 2>/dev/null
+  "$PY" - "$STATE" "$LABEL" "${1:-0}" "${2:-nan}" "${3:-}" "$THRESHOLD" "$STREAK_LIMIT" "$WINDOW" "$(_pid)" "${4:-}" "$(_state_of_panel)" "$(_pid_age_s "$(_pid)")" "$(_paints)" <<'PYEOF' 2>/dev/null
 import json, sys, time, pathlib
-state, label, streak, cpu, note, thr, limit, window, pid, disp, pstate, age = sys.argv[1:13]
+state, label, streak, cpu, note, thr, limit, window, pid, disp, pstate, age, paints = sys.argv[1:14]
 path = pathlib.Path(state)
 try:
     doc = json.loads(path.read_text())
@@ -190,6 +216,7 @@ doc.update({
     "display": disp.strip() or None,
     "panel_state": pstate.strip() or None,
     "pid_age_s": int(age) if age.strip().isdigit() else None,
+    "paints_per_sec": float(paints) if paints.strip().replace(".", "", 1).isdigit() else None,
     "note": note.strip() or None,
 })
 doc["samples"] = (doc.get("samples") or [])[-9:] + [
@@ -201,6 +228,7 @@ doc["samples"] = (doc.get("samples") or [])[-9:] + [
         "display": disp.strip() or None,
         "panel_state": pstate.strip() or None,
         "pid_age_s": int(age) if age.strip().isdigit() else None,
+        "paints_per_sec": float(paints) if paints.strip().replace(".", "", 1).isdigit() else None,
     }
 ]
 # 原子写：同目录唯一临时名 + os.replace（直写在中途被杀/并发时留半截 JSON）
@@ -253,6 +281,10 @@ if [[ "$INSTANCES" != "1" ]]; then
   exit 0
 fi
 
+# 注：本该在这里加一条「光标停在桌宠上 ⇒ 本轮不计」（实测 hover 态 2.0%→5.0%），但**撤回了**：
+# 实测判据不成立 —— CPU 读到 5.1% 的那一刻，探针的 `ignores_mouse_events` 仍是 True（该字段不是可靠的
+# hover 指示器）。判据不明的守卫比没有守卫更危险（可能悄悄废掉整条看门狗）。好消息是暂时不需要：
+# hover 态 ~5% **打不到 8% 的看门狗线**，真正的风险只在门禁「锁定档 5.0%」那条线上，而那只在有人手动跑时判。
 # 前置②：拖动中不计 —— 拖拽态 CPU 14~17% 是设计带宽，不是白烧。按笔记只在状态切换时写一行。
 if [[ "$(_dragging)" == "yes" ]]; then
   PREV_NOTE=$("$PY" -c "import json,os,sys;p=sys.argv[1];print((json.load(open(p)).get('note') or '') if os.path.exists(p) else '')" "$STATE" 2>/dev/null || print "")

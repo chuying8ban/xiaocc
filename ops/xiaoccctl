@@ -76,6 +76,13 @@ _pid()    { launchctl print "$DOMAIN/$LABEL" 2>/dev/null | awk '/^[[:space:]]*pi
 # 进程年龄：冷启动尾巴挺长（实测同一进程前 ~8 分钟 ~5%、之后 ~1.9%），不留这列就分不清
 # "这版更费"和"这一拍还在暖机"。留痕里带着它，历史数字才有可比性。
 _age_hms() { ps -o etime= -p "$1" 2>/dev/null | tr -d ' ' }
+# 真正画下去几帧/秒（probe 的 paints_per_sec）：CPU 高企时它是 15（正常重绘）还是 30+（指纹闸被打开），
+# 这一列是把「画得多」和「别处在烧」分开的唯一廉价判据。
+_paints() { "$PY" -c "
+import json,os
+try: d=json.load(open(os.path.expanduser('~/.xiaocc/probe.json')))
+except Exception: d={}
+print(d.get('paints_per_sec'))" 2>/dev/null; }
 _corner() { /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST_DST" 2>/dev/null || print '?' }
 _installed() { [[ -f "$PLIST_DST" ]] }
 
@@ -557,6 +564,8 @@ cmd_gate() {
     return 6
   fi
 
+  # 注：这里本该有「光标停在桌宠上 ⇒ 不判门槛」的前置，**撤回了** —— 判据（probe 的
+  # ignores_mouse_events）实测在 CPU 5.1% 时仍为 True，不可靠。跑 gate 前请手动把鼠标移开桌宠。
   disp="$(_display_state)"
   # 判据①**按显示状态分档**（@lead 2026-09-29 定）：屏醒未锁 ≤7%（本轮基线 5.4~5.7%）；屏睡/锁屏 ≤5%（史线不动）。
   # 同一面板两种状态的读数差 1~2 个百分点（实测：A 版屏睡 3.5~4.6% / 屏醒 5.4~5.7%），拿屏睡线去判屏醒读数
@@ -564,7 +573,7 @@ cmd_gate() {
   if [[ "$disp" == "醒着" ]]; then cpu_line=7.0; else cpu_line=5.0; fi
   print "== 门槛测量：${secs}s 稳态 CPU + 外部画面判据 / 显示状态：${disp}（判据①线 <${cpu_line}%）=="
   cpu=$(_cpu_pct "$pid" "$secs")
-  print "  A) CPU：${cpu}%（门槛 <${cpu_line}%，档=${disp}，进程年龄=$(_age_hms "$pid")）"
+  print "  A) CPU：${cpu}%（门槛 <${cpu_line}%，档=${disp}，进程年龄=$(_age_hms "$pid")，paints/s=$(_paints)）"
 
   probe_out=$("$ENTRY" probe 2>&1); probe_rc=$?
   motion=$(_motion_json "$pid" 3 0.7)
