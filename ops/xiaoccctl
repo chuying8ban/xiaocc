@@ -467,7 +467,8 @@ PYEOF
   #    state_ttl_s 为 null（idle/offline 这类不过期的状态）**永远不报**，否则每只正常待机的桌宠都会被报警。
   #    容差取 +5s 而不是严格 > TTL：状态可能在引擎上次判断之后才过期，写盘周期 1s + 一拍 ≤1s，贴线会误报。
   local pa r13
-  pa="$HOME/.xiaocc/probe.json"
+  # 允许指到别处的快照（与 xiaocc CLI 的 XIAOCC_PROBE_FILE 同一约定）—— 便于用造好的快照逐档验证，不碰真文件
+  pa="${XIAOCC_PROBE_FILE:-$HOME/.xiaocc/probe.json}"
   if [[ -z "$pid" ]]; then
     print "ℹ ⑬ 状态年龄：面板没在跑，跳过"
   elif [[ ! -f "$pa" ]]; then

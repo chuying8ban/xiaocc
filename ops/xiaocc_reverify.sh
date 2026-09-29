@@ -50,26 +50,34 @@ PYEOF
 say "补验任务启动：等屏幕亮（最多 ${WAIT_MAX}s，每 ${POLL}s 一眼，首次=$(_awake)）；欠账标记 $([[ -f "$DEBT" ]] && print '在' || print '不在')"
 
 waited=0
+verdict=""
 disp=$(_awake)
-while [[ "$disp" != "醒着" ]] && (( waited < WAIT_MAX )); do
+while (( waited < WAIT_MAX )); do
+  if [[ "$disp" == "醒着" ]]; then
+    # 2) 跑完整 gate（不用 --skip-motion：就是要那条外部像素判据）
+    out=$("$CTL" gate "$SECS" 2>&1)
+    rc=$?
+    motion=$(print -r -- "$out" | grep -o '连续帧差异 [0-9.]*%' | tail -1)
+    cpu=$(print -r -- "$out" | grep -o 'A) CPU：[0-9.]*%' | tail -1)
+    say "屏幕亮着 ⇒ gate rc=$rc ${cpu} ${motion}"
+    if (( rc != 5 )); then
+      verdict="$rc"
+      break
+    fi
+    # rc=5 = 判不了（恰好又睡了／像素抓不到）：**继续等**，别一轮判不了就整趟放弃
+    # （踩过：屏幕闪一下醒、等脚本走到 gate 时又睡了 → 整趟白跑，得手动重新 bootstrap）
+    say "gate 判不了（rc=5，屏幕又睡了？）⇒ 接着等屏幕亮再试"
+  fi
   sleep "$POLL"
   waited=$(( waited + POLL ))
   disp=$(_awake)
 done
-if [[ "${disp:-}" != "醒着" ]]; then
-  say "等了 ${waited}s 屏幕仍未醒（当前：${disp:-未知}）⇒ 本轮不补验；欠账保留、面板不动"
+if [[ -z "$verdict" ]]; then
+  say "等满 ${WAIT_MAX}s 仍没拿到真裁决（当前：${disp:-未知}）⇒ 本轮不补验；欠账保留、面板不动"
   exit 0
 fi
-say "屏幕醒了（等了 ${waited}s）⇒ 跑完整门禁（窗口 ${SECS}s）"
 
-# 2) 跑完整 gate（不用 --skip-motion：就是要那条外部像素判据）
-out=$("$CTL" gate "$SECS" 2>&1)
-rc=$?
-motion=$(print -r -- "$out" | grep -o '连续帧差异 [0-9.]*%' | tail -1)
-cpu=$(print -r -- "$out" | grep -o 'A) CPU：[0-9.]*%' | tail -1)
-say "gate rc=$rc ${cpu} ${motion}"
-
-case $rc in
+case "$verdict" in
   0)
     "$PY" - "$OKMARK" "$DEBT" "$cpu" "$motion" <<'PYEOF'
 import json, os, sys, time

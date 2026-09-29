@@ -24,4 +24,13 @@ local/
 
 # 连桌面一起截的取证图（能看见作者桌面上其它窗口的内容）——只留窗口本体图
 docs/evidence/*.desktop.png
+
+# 运维运行时产物：这些是「本机跑出来的现场」，不属于源码，别手滑入库
+probe.json
+anchor.json
+skip-motion.json
+reverify-ok.json
+reverify-fail.json
+xiaoccctl.log
+watchdog.log
 docs/evidence/1*-cli-real-run.png
