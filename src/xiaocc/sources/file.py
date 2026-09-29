@@ -10,8 +10,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import tempfile
 import time
 from pathlib import Path
 
@@ -123,7 +125,17 @@ class FileSource(StatusSource):
         payload.setdefault("state", State.IDLE.value)
         payload.setdefault("source", self.label)
         payload.setdefault("at", time.time())
-        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
-        tmp.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
-        tmp.replace(self.path)
+        # 临时名必须唯一（mkstemp）：file 源的用途就是让别人来写这个状态文件，
+        # 对方若也按``<文件>.tmp``再改名的通行写法，就会跟这里抢同一个临时文件。
+        fd, tmp_name = tempfile.mkstemp(
+            prefix=self.path.name + ".", suffix=".tmp", dir=str(self.path.parent)
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, ensure_ascii=False))
+            Path(tmp_name).replace(self.path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                Path(tmp_name).unlink()
+            raise
         return self.path

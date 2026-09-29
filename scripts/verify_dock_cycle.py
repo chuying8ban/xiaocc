@@ -196,6 +196,31 @@ def real_hover(seconds: float = 3.0) -> int:
     stable = max(ys) - min(ys) < 0.01
     ok = flips == 0 and stable and inside and expanded
     print(f"停在展开态={expanded}  展开后仍盖住鼠标={inside}  采样窗口内一动不动={stable}")
+
+    # ③ 离开要收起、但不能误触：走开 → 必须在 1.2s 内收起；收起后马上回到条上（没离开过）→ 不许展开
+    cursor[0] = wl.Point(screen.center.x, screen.center.y)
+    deadline = time.monotonic() + 1.2
+    collapsed_in = None
+    while time.monotonic() < deadline:
+        backend.linger(0.1)
+        if str(backend.probe().get("dock")) == "collapsed":
+            collapsed_in = round(1.2 - (deadline - time.monotonic()), 2)
+            break
+    _ok_leave = collapsed_in is not None
+    timing = f"{collapsed_in:.2f}s 内收起了" if _ok_leave else "1.2s 内没收起 ✗"
+    print(f"  离开后收起：{timing}")
+
+    # 再回到条上必须还能展开（不许卡死在收起态）。
+    # 注：Dock.update 里「收起」只在鼠标**离开窗口**时才发生，所以离开过就一定会重新武装 ——
+    # 缴械那道闸门防的是「窗口自己从鼠标底下挪走」那种抖动（就是刚修掉的 13px 上漂），
+    # 那条有 window_layout 的单元测试守着。这里只验真窗口下不会卡死。
+    strip = backend._window_local
+    cursor[0] = wl.Point(strip.center.x, strip.center.y)
+    backend.linger(0.8)
+    state_now = str(backend.probe().get("dock"))
+    _ok_reopen = state_now == "expanded"
+    print(f"  收回后再悬停：{state_now} —— {'能再展开（没卡死）' if _ok_reopen else '卡在收起态 ✗'}")
+    ok = ok and _ok_leave and _ok_reopen
     print("结果：" + ("悬停展开一次后彻底安静，不再自发震荡 ✓" if ok else "仍在震荡 ✗"))
     backend.close()
     return 0 if ok else 1
