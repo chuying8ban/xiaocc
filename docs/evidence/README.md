@@ -37,6 +37,7 @@
 | `11-at-bottom-left.png` | 走真实 CLI（`xiaocc run --source hermes -b appkit`）起的窗口：状态取自当时活着的 Hermes 会话（底部那行是它的会话标签），可当「CLI 真跑」的证据 |
 | `13-art-states-montage.png` | 7 个状态的对照图（原尺寸 + 60px + 32px）：证明 7 档一眼能区分、缩到 60px 仍认得出来 |
 | `evidence.json` | 上面每一步的断言明细（层级 / 透明度 / 穿透 / 尺寸 / 视图是否跟窗口） |
+| [cpu-process-type.md](cpu-process-type.md) | 另一个疑案的核查记录：面板 CPU 15% vs 4% 的真凶是 plist 里的 `ProcessType=Interactive`（进程外 `ps -o time=` 差量量的） |
 
 ## 为什么 `*_*.desktop.png` 不入库
 

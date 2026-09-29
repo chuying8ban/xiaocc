@@ -83,6 +83,7 @@ echo '{"state":"working","detail":"编译中","step":2,"total":5}' > ~/.xiaocc/s
 
 想动手扩展：接一个新状态源看 [docs/sources.md](docs/sources.md)（三分钟，含可运行示例；
 英文版 [docs/sources_EN.md](docs/sources_EN.md)），写一个新显示层看 [docs/backends.md](docs/backends.md)。
+额度那几行的数据来源与口径、设计稿与取证截图，以及其余文档的入口见 [docs/README.md](docs/README.md)。
 
 ## 耗电有闸门
 
