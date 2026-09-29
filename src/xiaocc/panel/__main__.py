@@ -11,10 +11,12 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
 from .paths import (
+    CHILD_ENV,
     DEFAULT_PANEL_HTML,
     request_open,
     running_panel,
@@ -57,7 +59,9 @@ def main(argv: list[str] | None = None) -> int:
         print(path)
         return 0
 
-    if args.request:
+    if args.request and os.environ.get(CHILD_ENV) != "1":
+        # 只有「谁都没在开」时才走到这里拉一个；被 request_open 拉起来的子进程带着
+        # CHILD_ENV 标记，直接往下走开自己的窗口 —— 不然它会再拉一个孙子（实测 3 个窗口）。
         result = request_open(theme=args.theme)
         if result == "raised":
             pid = running_panel()
@@ -66,7 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         if result == "failed":
             print("既没能请求到面板、也没能拉起它", file=sys.stderr)
             return 1
-        # 没人在开 ⇒ 自己成为面板进程，继续往下走
+        # "spawned" ⇒ 子进程已经在开窗了，自己收工
+        return 0
 
     try:
         from .window import open_panel

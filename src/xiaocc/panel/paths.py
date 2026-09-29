@@ -41,6 +41,13 @@ DEFAULT_PANEL_HTML = _env_path("XIAOCC_PANEL_HTML", XIAOCC_DIR / "panel.html")
 #: 面板轮询请求文件的周期（秒）
 REQUEST_POLL_S = 0.5
 
+#: 「有人正在拉起面板」的互斥锁（O_EXCL），防止一次点击开出 N 个窗口
+SPAWN_LOCK = _env_path("XIAOCC_PANEL_LOCK", XIAOCC_DIR / "panel.spawn")
+SPAWN_LOCK_TTL_S = 20.0
+
+#: 由 :func:`request_open` 拉起来的子进程带的标记：它不该再走一遍「要不要拉一个」
+CHILD_ENV = "XIAOCC_PANEL_CHILD"
+
 
 def read_json(path: Path) -> dict[str, Any]:
     """读一个 JSON 对象；不在/坏了都返回 ``{}``（面板与桌宠都不许因此报错）。"""
@@ -81,6 +88,44 @@ def running_panel() -> int | None:
     return None
 
 
+def take_spawn_lock() -> bool:
+    """抢「我正在拉起面板」的锁。抢到 = 由我来拉；抢不到 = 别人正在拉，别开第二个。
+
+    O_EXCL 是这里唯一靠谱的原子原语（先写 panel.json 再拉进程的话，两个调用方会同时看不到
+    状态文件而各开一个窗口 —— 实测：一次点击开出 3 个面板窗口）。
+    持锁方写好自己的 panel.json 后立刻放锁；进程中途死掉则靠 :data:`SPAWN_LOCK_TTL_S` 过期。
+    """
+    try:
+        fd = os.open(SPAWN_LOCK, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError:
+        try:
+            age = time.time() - SPAWN_LOCK.stat().st_mtime
+        except OSError:
+            return False
+        if age < SPAWN_LOCK_TTL_S:
+            return False
+        try:  # 陈锁：上一个拉起流程没放锁就死了
+            SPAWN_LOCK.unlink()
+        except OSError:
+            return False
+        return take_spawn_lock()
+    except OSError:
+        return False
+    try:
+        os.write(fd, str(os.getpid()).encode())
+        os.close(fd)
+    except OSError:
+        pass
+    return True
+
+
+def release_spawn_lock() -> None:
+    try:
+        SPAWN_LOCK.unlink()
+    except OSError:
+        pass
+
+
 def request_open(*, theme: str | None = None, spawn: bool = True) -> str:
     """请求「把面板打开/抬到前面」。
 
@@ -102,17 +147,23 @@ def request_open(*, theme: str | None = None, spawn: bool = True) -> str:
         return "failed"
     if running_panel() is not None or not spawn:
         return "raised"
+    if not take_spawn_lock():  # 别人正在拉，别开第二个窗口
+        return "raised"
     kwargs: dict[str, Any] = {}
     if sys.platform == "darwin":
         kwargs["start_new_session"] = True  # 别跟桌宠共享控制终端/信号组
+    env = dict(os.environ)
+    env[CHILD_ENV] = "1"  # 子进程别再走一遍「要不要拉一个」（否则子生孙，一次点击开出 N 个窗口）
     try:
         subprocess.Popen(
             [sys.executable, "-m", "xiaocc.panel", "--request"],
             stdin=subprocess.DEVNULL,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
+            env=env,
             **kwargs,
         )
     except OSError:
+        release_spawn_lock()
         return "failed"
     return "spawned"

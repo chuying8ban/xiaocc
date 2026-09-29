@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>小cc 面板 · 方向B 对账单</title>
+<style>
+  /* 方向B：对账单 —— 暖纸底、连续纸面不做卡片堆、衬线数字、点线引导、克制到近乎无装饰 */
+  :root{
+    --paper:#F4EFE6; --paper2:#EDE7DB; --ink:#2B2E3A; --ink2:#5A6070;
+    --hair:rgba(43,46,58,.14); --hair2:rgba(43,46,58,.28);
+    --blue:#3E6FD9; --cyan:#2E8FA6; --green:#3F9E6B; --orange:#C4841F; --red:#C0504A;
+    --serif:ui-serif,"New York","Songti SC",Georgia,serif;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#DED7C9;font:400 13.5px/1.65 -apple-system,"SF Pro Text",system-ui,sans-serif;color:var(--ink);
+       display:flex;justify-content:center;padding:26px}
+  .sheet{width:520px;background:var(--paper);border-radius:3px;padding:0 30px 0;
+         box-shadow:0 24px 60px rgba(43,46,58,.28), inset 0 0 0 1px rgba(255,255,255,.6)}
+  /* 入口预览条（桌宠上的那颗按钮，同一套视觉） */
+  .entry{display:flex;align-items:center;gap:9px;padding:14px 0;border-bottom:1px solid var(--hair)}
+  .entry .mini{width:26px;height:26px;border-radius:9px;background:#fff;border:1px solid var(--hair2);display:flex;
+               align-items:center;justify-content:center}
+  .entry .mini svg{width:17px;height:17px}
+  .entry .cap{font-size:11px;color:var(--ink2)}
+  .chip{margin-left:auto;display:flex;align-items:center;gap:6px;border:1px solid var(--hair2);border-radius:20px;
+        padding:4px 11px 4px 9px;background:rgba(255,255,255,.55);font:500 12px/1 var(--serif)}
+  .chip b{font-weight:600;font-family:var(--mono);font-size:11.5px}
+  .chip i{width:6px;height:6px;border-radius:50%;background:var(--green);display:block}
+  header{padding:22px 0 18px;border-bottom:2px solid var(--ink)}
+  header .t{display:flex;align-items:baseline;gap:10px}
+  h1{margin:0;font:400 20px/1.2 var(--serif);letter-spacing:.01em}
+  header .meta{margin-left:auto;font:400 10.5px/1.6 var(--mono);color:var(--ink2);text-align:right}
+  .lead{display:flex;align-items:flex-end;gap:12px;margin-top:20px}
+  .lead .num{font:400 52px/1 var(--serif);letter-spacing:-.015em}
+  .lead .cur{font:400 13px/1 var(--mono);color:var(--ink2);padding-bottom:7px}
+  .lead .exp{margin-left:auto;text-align:right;font:400 11px/1.7 var(--mono);color:var(--ink2)}
+  h2{margin:26px 0 10px;font:600 10.5px/1 -apple-system;letter-spacing:.16em;text-transform:uppercase;color:var(--ink2)}
+  h2 em{font-style:normal;letter-spacing:0;text-transform:none;font-weight:400;font-family:var(--mono);font-size:10px;color:var(--ink2);opacity:.75;float:right;padding-top:1px}
+  /* 对账行：名 ⇢ 点线 ⇢ 值 */
+  .li{display:flex;align-items:baseline;gap:8px;padding:8px 0;font-size:13px}
+  .li .nm{font-weight:500}
+  .li .nm small{font-weight:400;color:var(--ink2);font-size:10.5px;margin-left:6px}
+  .li .fill{flex:1;border-bottom:1px dotted var(--hair2);transform:translateY(-3px)}
+  .li .amt{font:500 13px/1 var(--mono);white-space:nowrap}
+  .li .amt.unk{color:var(--ink2);font-weight:400;border-bottom:1px dashed var(--hair2);padding-bottom:2px}
+  .li .go{font:400 10.5px/1 -apple-system;color:var(--blue);text-decoration:none;opacity:.8;margin-left:8px;white-space:nowrap}
+  .li .go:hover{opacity:1;text-decoration:underline}
+  .state{display:inline-block;width:7px;height:7px;margin-right:8px;border-radius:1px;background:var(--green);transform:rotate(45deg)}
+  .state.unk{background:transparent;border:1px solid var(--hair2)}
+  /* 账本表 */
+  table{width:100%;border-collapse:collapse;font:400 12px/1.6 var(--mono);margin-top:2px}
+  thead th{text-align:left;font:600 9.5px/1 -apple-system;letter-spacing:.12em;text-transform:uppercase;
+           color:var(--ink2);padding:0 0 7px;border-bottom:1px solid var(--ink)}
+  thead th:last-child{text-align:right}
+  td{padding:7px 0;border-bottom:1px solid var(--hair)}
+  td:last-child{text-align:right}
+  td.n{font-weight:500}
+  .seg{display:flex;gap:6px;margin:0 0 12px}
+  .seg button{border:1px solid var(--hair2);background:transparent;color:var(--ink2);border-radius:2px;
+              padding:4px 9px;font:500 10.5px/1 -apple-system;cursor:pointer}
+  .seg button.on{background:var(--ink);border-color:var(--ink);color:var(--paper)}
+  .foot{color:var(--ink2);font-size:10.5px;line-height:1.7;margin:12px 0 0}
+  /* 设置：极简行 */
+  .opt{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--hair)}
+  .opt .t{display:block;font-weight:500;font-size:13px}
+  .opt .d{display:block;color:var(--ink2);font-size:10.5px;margin-top:1px}
+  .opt .set{margin-left:auto;font:400 11px/1 var(--mono);color:var(--ink2);display:flex;align-items:center;gap:7px}
+  .pip{width:26px;height:14px;border:1px solid var(--hair2);border-radius:9px;position:relative}
+  .pip i{position:absolute;top:2px;left:2px;width:8px;height:8px;border-radius:50%;background:var(--hair2)}
+  .pip.on{border-color:var(--ink)}
+  .pip.on i{left:14px;background:var(--ink)}
+  footer{border-top:1px solid var(--hair);margin-top:24px;padding:12px 0 18px;display:flex;gap:10px;
+         font:400 10.5px/1.6 var(--mono);color:var(--ink2)}
+  footer .spacer{flex:1}
+</style>
+</head>
+<body>
+<div class="sheet">
+  <div class="entry">
+    <span class="mini">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="4.5" width="19" height="15" rx="5" fill="#fff" stroke="#2B2E3A" stroke-width="1.4"/><rect x="6.5" y="8.5" width="11" height="6.5" rx="3.2" fill="#2B2E3A"/><path d="M9.4 11.8c.9 1.1 4.3 1.1 5.2 0" stroke="#6FD3E8" stroke-width="1.3" stroke-linecap="round"/><path d="M12 4.5V2.6" stroke="#2B2E3A" stroke-width="1.4" stroke-linecap="round"/><circle cx="12" cy="2" r="1.2" fill="#FFC24B"/></svg>
+    </span>
+    <span class="cap">桌宠上的入口（同一套视觉）</span>
+    <span class="chip"><i></i><b>¥79.95</b></span>
+  </div>
+
+  <header>
+    <div class="t">
+      <h1>额度对账单</h1>
+      <span class="meta">小cc<br>采集 3 分钟前</span>
+    </div>
+    <div class="lead">
+      <div class="num">¥79.95</div><div class="cur">DeepSeek 可用余额</div>
+      <div class="exp">赠送 0.00<br>充值 79.95</div>
+    </div>
+  </header>
+
+  <h2>各家额度 <em>1 家有接口 / 4 家</em></h2>
+  <div class="li"><span class="state"></span><span class="nm">DeepSeek<small>官方接口实时</small></span>
+    <span class="fill"></span><span class="amt">¥79.95</span></div>
+  <div class="li"><span class="state unk"></span><span class="nm">千问云 Token Plan<small>你的主力 · qwen3.8-max</small></span>
+    <span class="fill"></span><span class="amt unk">未取到</span><a class="go" href="#">控制台 ↗</a></div>
+  <div class="li"><span class="state unk"></span><span class="nm">百炼 DashScope<small>按量 key</small></span>
+    <span class="fill"></span><span class="amt unk">未取到</span><a class="go" href="#">控制台 ↗</a></div>
+  <div class="li"><span class="state unk"></span><span class="nm">Nous Portal<small>登录后看 Credits</small></span>
+    <span class="fill"></span><span class="amt unk">未取到</span><a class="go" href="#">控制台 ↗</a></div>
+  <p class="foot">「未取到」= 该服务没有可用的额度接口，或本机还没有登录凭据 —— 不是 0。点「控制台」去看权威数字。</p>
+
+  <h2>本机账本 · 近 30 天 <em>估价，非账单</em></h2>
+  <div class="seg"><button class="on">默认 profile</button><button>全部 6 库</button></div>
+  <table>
+    <thead><tr><th>项目</th><th>值</th></tr></thead>
+    <tbody>
+      <tr><td>模型调用</td><td class="n">61,559 次</td></tr>
+      <tr><td>累计花费</td><td class="n">$44.45 USD</td></tr>
+      <tr><td>未计价调用</td><td class="n">5,203 次</td></tr>
+      <tr><td>窗口</td><td class="n">30 天</td></tr>
+    </tbody>
+  </table>
+  <p class="foot">金额取本机 state.db 的记账字段（Hermes 自报价目，普遍偏低），只作趋势参考；未计价 = 那一行没有金额，不含在上面的花费里。</p>
+
+  <h2>桌宠</h2>
+  <div class="opt"><span><span class="t">语音</span><span class="d">默认关闭</span></span>
+    <span class="set">关<span class="pip"><i></i></span></span></div>
+  <div class="opt"><span><span class="t">贴边收起</span><span class="d">拖到屏幕边缘自动吸附</span></span>
+    <span class="set">开<span class="pip on"><i></i></span></span></div>
+  <div class="opt"><span><span class="t">开机自启</span><span class="d">登录时拉起小cc</span></span>
+    <span class="set">开<span class="pip on"><i></i></span></span></div>
+
+  <footer>
+    <span>下一轮 12 分钟后</span><span class="spacer"></span><span>quota.json · 0600 · schema 1</span>
+  </footer>
+</div>
+</body>
+</html>

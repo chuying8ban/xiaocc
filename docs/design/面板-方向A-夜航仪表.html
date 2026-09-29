@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>小cc 面板 · 方向A 夜航仪表</title>
+<style>
+  /* 方向A：夜航仪表 —— 深色、仪表感、等宽数字、发丝分隔线；小cc 的调色板（#6FD3E8/#FFC24B/#5BD08A/#F2665E）当状态色 */
+  :root{
+    --paper:#14161C; --panel:#1B1E26; --panel2:#22262F;
+    --ink:#E8EAF0; --muted:#8A90A0; --faint:#5C6273;
+    --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
+    --cyan:#6FD3E8; --orange:#FFC24B; --green:#5BD08A; --red:#F2665E; --blue:#8FA7FF;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:#0B0D11;font:400 13px/1.5 -apple-system,"SF Pro Text",system-ui,sans-serif;color:var(--ink);
+       display:flex;justify-content:center;padding:24px}
+  .win{width:520px;background:var(--paper);border:1px solid var(--line2);border-radius:14px;overflow:hidden;
+       box-shadow:0 30px 80px rgba(0,0,0,.55)}
+  /* 入口预览条（桌宠上的那颗按钮，同一套视觉） */
+  .entry{display:flex;align-items:center;gap:9px;padding:11px 16px;border-bottom:1px solid var(--line);background:#171A21}
+  .entry .mini{width:26px;height:26px;border-radius:8px;border:1px solid var(--line2);background:#101319;
+                display:flex;align-items:center;justify-content:center}
+  .entry .mini svg{width:17px;height:17px}
+  .entry .cap{font-size:11px;color:var(--faint)}
+  .chip{margin-left:auto;display:flex;align-items:center;gap:7px;border:1px solid var(--line2);border-radius:20px;
+        padding:4px 11px 4px 9px;background:rgba(111,211,232,.06);font:500 11.5px/1 var(--mono);color:var(--cyan)}
+  .chip i{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 7px var(--green);display:block}
+  /* 标题栏 */
+  .bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--line);background:var(--panel)}
+  .dot{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 8px var(--green)}
+  .bar h1{margin:0;font-size:13px;font-weight:600;letter-spacing:.02em}
+  .bar .sub{color:var(--faint);font:400 11px/1 var(--mono)}
+  .bar .spacer{flex:1}
+  .btn{border:1px solid var(--line2);background:transparent;color:var(--muted);border-radius:7px;padding:5px 10px;
+       font:500 11px/1 -apple-system;cursor:pointer}
+  .btn:hover{color:var(--ink);border-color:var(--cyan)}
+  /* 区段 */
+  section{padding:16px}
+  section+section{border-top:1px solid var(--line)}
+  .label{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);margin-bottom:12px;display:flex;gap:8px;align-items:center}
+  .label .tag{margin-left:auto;letter-spacing:0;text-transform:none;font:400 10px/1 var(--mono);color:var(--faint);border:1px solid var(--line2);border-radius:20px;padding:3px 7px}
+  /* 余额主数字 */
+  .hero{display:flex;align-items:flex-end;gap:14px}
+  .hero .num{font:600 46px/1 var(--mono);letter-spacing:-.02em;
+             background:linear-gradient(180deg,#fff,#B9C2D6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .cur{font:500 15px/1 var(--mono);color:var(--cyan);padding-bottom:6px}
+  .hero .split{margin-left:auto;text-align:right;font:400 11px/1.7 var(--mono);color:var(--muted)}
+  .hero .split b{color:var(--ink);font-weight:500}
+  .rule{height:1px;background:var(--line);margin:14px 0 6px}
+  /* 服务行 */
+  .rows{display:flex;flex-direction:column}
+  .row{display:flex;align-items:center;gap:10px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:0}
+  .row .st{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+  .st.ok{background:var(--green);box-shadow:0 0 7px var(--green)}
+  .st.unk{background:transparent;border:1px dashed var(--faint)}
+  .row .name{font-weight:500}
+  .row .name small{display:block;color:var(--faint);font-size:10px;font-weight:400;margin-top:2px}
+  .row .val{margin-left:auto;text-align:right;font:500 13px/1.35 var(--mono)}
+  .row .val em{display:block;font:400 10px/1.5 var(--mono);font-style:normal;color:var(--faint)}
+  .row a{color:var(--cyan);text-decoration:none;font:400 10px/1 -apple-system;opacity:.75}
+  .row a:hover{opacity:1;text-decoration:underline}
+  /* 账本 */
+  .seg{display:inline-flex;border:1px solid var(--line2);border-radius:7px;overflow:hidden;margin-bottom:12px}
+  .seg button{border:0;background:transparent;color:var(--faint);padding:5px 9px;font:500 11px/1 -apple-system;cursor:pointer}
+  .seg button.on{background:var(--panel2);color:var(--ink)}
+  table{width:100%;border-collapse:collapse;font:400 12px/1.6 var(--mono)}
+  td{padding:6px 0;border-bottom:1px solid var(--line)}
+  tr:last-child td{border-bottom:0}
+  td.k{color:var(--muted)}
+  td.v{text-align:right;font-weight:500}
+  td.v small{color:var(--faint);font-weight:400}
+  .note{color:var(--faint);font-size:10.5px;line-height:1.6;margin-top:10px}
+  /* 开关 */
+  .sw{display:flex;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+  .sw:last-child{border-bottom:0}
+  .sw .t{display:block;font-weight:500}
+  .sw .d{display:block;color:var(--faint);font-size:10.5px;margin-top:2px}
+  .tog{margin-left:auto;width:34px;height:19px;border-radius:20px;background:var(--panel2);border:1px solid var(--line2);position:relative;flex:0 0 auto}
+  .tog i{position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--faint)}
+  .tog.on{background:rgba(111,211,232,.22);border-color:var(--cyan)}
+  .tog.on i{left:18px;background:var(--cyan);box-shadow:0 0 8px var(--cyan)}
+  /* 页脚 */
+  footer{padding:11px 16px;border-top:1px solid var(--line);background:var(--panel);display:flex;gap:8px;
+         font:400 10.5px/1.5 var(--mono);color:var(--faint)}
+  footer .spacer{flex:1}
+</style>
+</head>
+<body>
+<div class="win">
+  <div class="entry">
+    <span class="mini">
+      <svg viewBox="0 0 24 24" fill="none"><rect x="2.5" y="4.5" width="19" height="15" rx="5" fill="#1D212A" stroke="#8A90A0" stroke-width="1.3"/><rect x="6.5" y="8.5" width="11" height="6.5" rx="3.2" fill="#0B0D11"/><path d="M9.4 11.8c.9 1.1 4.3 1.1 5.2 0" stroke="#6FD3E8" stroke-width="1.3" stroke-linecap="round"/><path d="M12 4.5V2.6" stroke="#8A90A0" stroke-width="1.3" stroke-linecap="round"/><circle cx="12" cy="2" r="1.2" fill="#FFC24B"/></svg>
+    </span>
+    <span class="cap">桌宠上的入口（同一套视觉）</span>
+    <span class="chip"><i></i>¥79.95</span>
+  </div>
+  <div class="bar">
+    <span class="dot"></span>
+    <h1>小cc · 面板</h1>
+    <span class="sub">采集 3 分钟前</span>
+    <span class="spacer"></span>
+    <button class="btn">刷新</button>
+  </div>
+
+  <section>
+    <div class="label">官方实时余额 <span class="tag">1 家有接口 / 4 家</span></div>
+    <div class="hero">
+      <div class="num">79.95</div><div class="cur">CNY</div>
+      <div class="split">赠送 <b>0.00</b><br>充值 <b>79.95</b></div>
+    </div>
+    <div class="rule"></div>
+    <div class="rows">
+      <div class="row">
+        <span class="st ok"></span>
+        <span class="name">DeepSeek<small>api.deepseek.com/user/balance</small></span>
+        <span class="val">¥79.95<em>实时 · 可用</em></span>
+      </div>
+      <div class="row">
+        <span class="st unk"></span>
+        <span class="name">千问云 Token Plan<small>你的主力 · qwen3.8-max</small></span>
+        <span class="val">未知<em>需 CLI 登录</em></span>
+        <span><a href="#">控制台 ↗</a></span>
+      </div>
+      <div class="row">
+        <span class="st unk"></span>
+        <span class="name">百炼 DashScope<small>按量 key</small></span>
+        <span class="val">未知<em>per-key 无接口</em></span>
+        <span><a href="#">控制台 ↗</a></span>
+      </div>
+      <div class="row">
+        <span class="st unk"></span>
+        <span class="name">Nous Portal<small>需登录后看 Credits</small></span>
+        <span class="val">未知<em>缺凭据</em></span>
+        <span><a href="#">控制台 ↗</a></span>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="label">本机账本 · 近 30 天 <span class="tag">估价，非账单</span></div>
+    <div class="seg"><button class="on">默认 profile</button><button>全部 6 库</button></div>
+    <table>
+      <tr><td class="k">模型调用</td><td class="v">61,559 次</td></tr>
+      <tr><td class="k">累计花费</td><td class="v">$44.45 <small>USD</small></td></tr>
+      <tr><td class="k">未计价调用</td><td class="v">5,203 <small>次</small></td></tr>
+    </table>
+    <p class="note">金额来自本机 state.db 的记账字段（Hermes 自报价目，会低估），只作趋势参考；未计价 = 那一行没有金额，不是 0。</p>
+  </section>
+
+  <section>
+    <div class="label">桌宠</div>
+    <div class="sw"><span><span class="t">语音</span><span class="d">默认关闭</span></span><span class="tog"><i></i></span></div>
+    <div class="sw"><span><span class="t">贴边收起</span><span class="d">拖到屏幕边缘自动吸附</span></span><span class="tog on"><i></i></span></div>
+    <div class="sw"><span><span class="t">开机自启</span><span class="d">登录时拉起小cc</span></span><span class="tog on"><i></i></span></div>
+  </section>
+
+  <footer>
+    <span>下一轮 12 分钟后</span><span class="spacer"></span><span>quota.json · 0600 · schema 1</span>
+  </footer>
+</div>
+</body>
+</html>

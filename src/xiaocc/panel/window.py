@@ -29,6 +29,7 @@ from .paths import (
     PANEL_REQUEST,
     PANEL_STATE,
     REQUEST_POLL_S,
+    release_spawn_lock,
 )
 from .render import build_payload, render_html, write_panel
 
@@ -178,6 +179,7 @@ def open_panel(
                 os.chmod(PANEL_STATE, 0o600)
             except OSError:
                 pass
+            release_spawn_lock()  # 状态文件已就位 ⇒ 别人看得到「已有面板」，可以让别人抢了
 
         def _reload(self) -> None:
             if self._web is not None:
@@ -199,15 +201,23 @@ def open_panel(
             threading.Thread(target=work, daemon=True).start()
 
         def _raise(self) -> None:
-            if self._window is not None:
-                AppKit.NSApp.activateIgnoringOtherApps_(True)
-                self._window.makeKeyAndOrderFront_(None)
+            """抬到前面。**被收进 Dock 的也要拉回来** —— 实测用户会把挡事的窗口点小化，
+            这时 makeKeyAndOrderFront 不动它（isVisible=False / isMiniaturized=True），
+            再点桌宠就好像没反应。"""
+            if self._window is None:
+                return
+            AppKit.NSApp.activateIgnoringOtherApps_(True)
+            if self._window.isMiniaturized():
+                self._window.deminiaturize_(None)
+            self._window.makeKeyAndOrderFront_(None)
+            self._window.orderFrontRegardless()
 
         def _close(self) -> None:
             try:
                 PANEL_STATE.unlink()
             except OSError:
                 pass
+            release_spawn_lock()
             AppKit.NSApp.terminate_(None)
 
         def _setup(self) -> None:

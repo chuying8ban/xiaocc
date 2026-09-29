@@ -34,4 +34,15 @@ fi
 CORNER="${1:-top-right}"
 FPS="${2:-15}"          # @lead 允许待机 12~15 帧；15 帧在部署路径上实测 4.9%（30 帧是 9.0%）
 
-exec "$ENTRY" run --source hermes -b appkit --backend-opt "at=$CORNER" --backend-opt "fps=$FPS"
+# 停靠点只在「没有锚点文件」时传给显示层（第一次运行 = 落到 $CORNER）。
+# 为什么：`--backend-opt at=...` 的语义是「运维显式指定，锚点让位」（appkit 里就是这么实现的），
+# 所以一直传它，用户手动拖到的位置就会被每次重启拽回角落 —— 2026-09-29 实测：
+# 用户拖到 1229,178，重启后回到 1324,96（at=top-right）。不传时显示层的行为是
+# 「有锚点用锚点、没有才默认右上角」，正好是想要的那条。
+ANCHOR="${XIAOCC_ANCHOR_FILE:-$HOME/.xiaocc/anchor.json}"
+AT_ARGS=()
+if [[ ! -s "$ANCHOR" ]]; then
+  AT_ARGS=(--backend-opt "at=$CORNER")
+fi
+
+exec "$ENTRY" run --source hermes -b appkit "${AT_ARGS[@]}" --backend-opt "fps=$FPS"
