@@ -107,11 +107,37 @@ class Engine:
 
         chosen = pick(events, now)
         if chosen is None:
-            detail = "没有任何状态源在线"
-            if self._errors:
-                # 全都没消息时，把故障原因说出来，而不是笼统地报「离线」
-                detail = "状态源故障：" + "；".join(f"{k} {v}" for k, v in self._errors.items())
-            chosen = StatusEvent(source="engine", state=State.OFFLINE, at=now, detail=detail)
+            # ``pick()`` 交白卷其实有两种**不同**的局面，不能都扣「离线」帽子：
+            #   ① events 为空：真的没有任何源说话（没装 / 沉默 / 炸了）→ 这才是 offline；
+            #   ② events 非空但全被 TTL 判过期：源还活着，只是它报的那件事过了保鲜期
+            #      （例如 done 的 TTL 是 12s，源最后一次活动在 13s 前）→ 该演 idle。
+            # 为什么 ② 必须是 idle：源活着却说它「离线」是撒谎，用户看到的是「小cc 没连上
+            # 任何源」，这正是「每轮任务结束闪一下离线脸」的病根之一（与 done 窗口那次同源：
+            # 都是把「事件不新鲜」错当成「源不存在」）。idle 的语义是「在线但没在忙」，
+            # 恰好就是 ② 的事实。
+            # 判据只用 ``pick()`` 拿到的 events 是否为空——TTL 归协议管，引擎不自己重算。
+            if events:
+                spoken = sorted({event.source for event in events})
+                log.debug(
+                    "合成 idle：%d 个源在线（%s），%d 条事件全部过期",
+                    len(spoken),
+                    "、".join(spoken),
+                    len(events),
+                )
+                chosen = StatusEvent(
+                    source="engine", state=State.IDLE, at=now, detail="源在线，当前无活动"
+                )
+            else:
+                detail = "没有任何状态源在线"
+                if self._errors:
+                    # 全都没消息时，把故障原因说出来，而不是笼统地报「离线」
+                    detail = "状态源故障：" + "；".join(f"{k} {v}" for k, v in self._errors.items())
+                log.debug(
+                    "合成 offline：%d 个源这一轮都没说话（其中 %d 个故障）",
+                    len(self.sources),
+                    len(self._errors),
+                )
+                chosen = StatusEvent(source="engine", state=State.OFFLINE, at=now, detail=detail)
 
         if self._frame is not None and _identity(self._frame.event) == _identity(chosen):
             # 内容没变：静默更新一下时间戳，但不打扰显示层
