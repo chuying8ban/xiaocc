@@ -113,16 +113,25 @@ def _pct(part: Any, whole: Any) -> str | None:
     return f"{part / whole * 100.0:.0f}%"
 
 
-def _device_parts(device: Any) -> list[str]:
-    """设备状态 → 可拼的部件（取不到的项写「未取到」，**绝不补 0**）。"""
+def _device_parts(device: Any, *, pending: bool = False) -> list[str]:
+    """设备状态 → 可拼的部件（取不到的项写「未取到」，**绝不补 0**）。
+
+    ``pending=True`` = **基线还没攒够**（CPU 那个 1 秒窗口），不是"采不到"：这两种空必须分开写
+    ——把「等一秒就有」写成「未取到」才是让用户以为坏了的假数（面板那格写的就是「采集中…」，
+    三处出口的词表得是同一套）。
+    """
     if device is None:
         return []
     cpu = getattr(device, "cpu_percent", None)
     mem = _pct(getattr(device, "mem_used", None), getattr(device, "mem_total", None))
     disk = _pct(getattr(device, "disk_used", None), getattr(device, "disk_total", None))
     battery = getattr(device, "battery", None)
+    if cpu is None:
+        cpu_part = "CPU 采集中" if pending else "CPU 未取到"
+    else:
+        cpu_part = f"CPU {cpu:.0f}%"
     parts = [
-        "CPU 未取到" if cpu is None else f"CPU {cpu:.0f}%",
+        cpu_part,
         "内存 未取到" if mem is None else f"内存 {mem}",
         "磁盘 未取到" if disk is None else f"磁盘 {disk}",
     ]
@@ -131,9 +140,9 @@ def _device_parts(device: Any) -> list[str]:
     return parts
 
 
-def device_bubble_candidates(device: Any) -> list[list[str]]:
+def device_bubble_candidates(device: Any, *, pending: bool = False) -> list[list[str]]:
     """设备状态那两行（CPU/内存 在上、磁盘/电池 在下），按 @writer 量的每行 148px 排。"""
-    return _pack_candidates(_device_parts(device))
+    return _pack_candidates(_device_parts(device, pending=pending))
 
 
 def bubble_candidates(
@@ -142,6 +151,7 @@ def bubble_candidates(
     report: dict[str, Any] | None = None,
     meta: dict[str, Any] | None = None,
     device: Any = None,
+    device_pending: bool = False,
 ) -> list[list[str]]:
     """单击小cc 时气泡该写什么 —— **三档字面都从这里出，调用方只按宽度挑**。
 
@@ -159,7 +169,7 @@ def bubble_candidates(
     action = _ACTION_ALIASES.get(action, action)
     if action == "none":
         return []
-    device_cands = device_bubble_candidates(device)
+    device_cands = device_bubble_candidates(device, pending=device_pending)
     if action == "device":
         return device_cands
     quota_cands = badge_bubble_candidates(report, meta)

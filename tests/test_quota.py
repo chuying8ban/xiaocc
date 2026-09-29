@@ -620,6 +620,24 @@ def test_device_candidates_say_taken_failed_never_zero():
     assert "未取到" in flat and "0%" not in flat
 
 
+def test_device_candidates_say_collecting_when_baseline_is_too_new():
+    """`pending`（基线还没攒够那 1 秒）**不许写成「未取到」** —— 那是「等一秒就有」的假故障。
+
+    面板那格写的是「采集中…」；气泡/菜单要同一套词，否则同一个物理状态三种说法。
+    """
+    fresh = FakeDevice(cpu_percent=None)
+    collecting = device_bubble_candidates(fresh, pending=True)
+    assert collecting[0][0] == "CPU 采集中 · 内存 60%"  # 不是「未取到」
+    failed = device_bubble_candidates(fresh, pending=False)
+    assert failed[0][0].startswith("CPU 未取到")
+    # 顶层入口也要把 pending 透下去（三档共用）
+    dev = FakeDevice(cpu_percent=None)
+    assert bubble_candidates(
+        "device", report=OK_REPORT, meta={"exists": True, "age_s": 1, "stale": False},
+        device=dev, device_pending=True,
+    )[0][0].startswith("CPU 采集中")
+
+
 def test_action_enum_is_single_sourced_across_modules():
     """档位枚举/别名**只有一份**（`settings`），`quota.badge` 是引过来的、不是抄一份。
 
