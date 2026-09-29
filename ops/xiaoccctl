@@ -33,17 +33,19 @@ set -u
 
 SCRIPT_DIR="${0:A:h}"
 PROJECT_DIR="${SCRIPT_DIR:h}"
-LABEL="ai.hermes.xiaocc"
+LABEL="${XIAOCC_LABEL:-ai.hermes.xiaocc}"
+# ⚠ 下面这几个 **只给回归/沙箱用**：把 ctl 指到可抛标签上，避免验证时碰真作业、真状态文件、真留痕。
+# 不做成"配置项"，是因为误设的代价不对称：指错 label = 停错东西。所以默认值必须是真作业。
 OLD_LABEL="ai.hermes.mascot-pet"
 GUARD_LABEL="${XIAOCC_GUARD_LABEL:-ai.hermes.mascot-pet.keepawake}"   # 睡眠闸守卫：名字留着，依赖已改成指向 xiaocc；可用环境变量接管以便沙箱验证
 DOMAIN="gui/$(id -u)"
-PLIST_SRC="$PROJECT_DIR/ops/ai.hermes.xiaocc.plist"
-PLIST_DST="$HOME/Library/LaunchAgents/ai.hermes.xiaocc.plist"
+PLIST_SRC="${XIAOCC_PLIST_SRC:-$PROJECT_DIR/ops/ai.hermes.xiaocc.plist}"
+PLIST_DST="${XIAOCC_PLIST:-$HOME/Library/LaunchAgents/ai.hermes.xiaocc.plist}"
 LOGDIR="$HOME/Library/Logs/xiaocc"
-STATE="$LOGDIR/state.json"
+STATE="${XIAOCC_STATE:-$LOGDIR/state.json}"
 PANEL_LOG="$LOGDIR/panel.log"
 PANEL_ERR="$LOGDIR/panel.err.log"
-CTL_LOG="$LOGDIR/xiaoccctl.log"
+CTL_LOG="${XIAOCC_CTL_LOG:-$LOGDIR/xiaoccctl.log}"
 PY="$PROJECT_DIR/.venv/bin/python"
 ENTRY="$PROJECT_DIR/.venv/bin/xiaocc"
 #: 判「屏上有几只面板」用的 pgrep 模式（watchdog 用同一个口径，可用环境变量接管以便沙箱测试）
