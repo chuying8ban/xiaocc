@@ -182,13 +182,14 @@ def test_abs_path_in_published_file_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     files = dict(BASE_FILES)
+    leaked = "/Users/" + "ciuser"
     files["ops/ai.hermes.xiaocc.plist"] = (
-        "\t<string>/Users/a29285/ChenC/xiaocc/ops/run-panel.sh</string>\n"
+        "\t<string>" + leaked + "/ChenC/xiaocc/ops/run-panel.sh</string>\n"
     )
     root = make_repo(tmp_path, files)
     rc, out = run_check(root, capsys)
     assert rc == 1
-    assert "FAIL ops/ai.hermes.xiaocc.plist:1  硬编码绝对路径：/Users/a29285" in out
+    assert "FAIL ops/ai.hermes.xiaocc.plist:1  硬编码绝对路径：" + leaked in out
 
 
 def test_placeholder_home_is_exempt(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -223,10 +224,10 @@ def test_abs_path_allowlisted_file_is_skipped(
 @pytest.mark.parametrize(
     "line,label",
     [
-        ('KEY = "sk-abcdefghijklmnop"\n', "sk- 密钥"),
-        ('headers = {"Authorization": "Bearer abcdefghijklmnop"}\n', "Bearer 令牌"),
-        ("-----BEGIN RSA PRIVATE KEY-----\n", "私钥文件头"),
-        ('api_key = "hunter2hunter2"\n', "凭据赋值"),
+        ("KEY = " + '"sk-' + "abcdefghijklmnop" + '"\n', "sk- 密钥"),
+        ("headers = " + '{"Authorization": "Bearer ' + "abcdefghijklmnop" + '"}\n', "Bearer 令牌"),
+        ("-----BEGIN " + "RSA PRIVATE KEY-----\n", "私钥文件头"),
+        ("api_key" + " = " + '"' + "hunter2hunter2" + '"\n', "凭据赋值"),
     ],
 )
 def test_secret_is_red(

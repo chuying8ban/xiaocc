@@ -7,13 +7,13 @@
 
 | 东西 | 位置 | 谁维护 |
 | --- | --- | --- |
-| LaunchAgent（自启+守护） | `~/Library/LaunchAgents/ai.hermes.xiaocc.plist` ← 仓库原件 `ops/ai.hermes.xiaocc.plist` | 本目录，`xiaoccctl start` 会覆盖式同步 |
+| LaunchAgent（自启+守护） | `~/Library/LaunchAgents/ai.hermes.xiaocc.plist` ← 模板 `ops/templates/ai.hermes.xiaocc.plist.in` | 本目录，`ops/install.sh` 渲染安装；`xiaoccctl start` 覆盖式同步 |
 | 启动器 | `ops/run-panel.sh <角落>`，只做「找出 venv 入口 → `exec`」，不做日志、不重试 | 本目录 |
 | 控制入口 | `ops/xiaoccctl {status\|start\|stop\|restart\|doctor\|logs [err]}` | 本目录 |
 | 面板日志 | `~/Library/Logs/xiaocc/panel.log`、`panel.err.log`（各自 >200KB 覆盖式轮转成 `.1`） | launchd |
 | 本脚本日志 | `~/Library/Logs/xiaocc/xiaoccctl.log` | `xiaoccctl` |
 | **状态落盘** | `~/Library/Logs/xiaocc/state.json`（ts / 是否加载 / pid / 停靠点 / 窗口矩形 / last_error） | `xiaoccctl` |
-| 睡眠闸守卫 | `~/Library/LaunchAgents/ai.hermes.mascot-pet.keepawake.plist`（原件 `ops/keepawake.plist`） | 见 §3 |
+| 睡眠闸守卫 | `~/Library/LaunchAgents/ai.hermes.mascot-pet.keepawake.plist`（原件**不放公开仓**：`local/keepawake.plist`，见 §3） | 见 §3 |
 
 **人不在机器前时先看这两个文件**：`~/Library/Logs/xiaocc/state.json`（一行就能判断活没活）与 `ops/xiaoccctl doctor`（9 项自检，含「窗口是否真的在屏幕上」）。
 
@@ -33,6 +33,10 @@ ops/xiaoccctl logs err    # 看 stderr 末尾 40 行
 
 退出码：`0` 正常 / `1` 未运行 / `2` 用法错 / `3` 没装 / `4` 操作或自检失败。
 **全程静默**：没有 osascript、没有弹窗，双击 `.command` 也不会跳窗。
+
+**安装 / 同步**：clone 到新机器后先跑 `ops/install.sh`，它把 `ops/templates/*.plist.in` 渲染成这台机器的
+真 plist 装进 `~/Library/LaunchAgents`（`--dry-run` 只看不写，`--dest DIR` 装到别处自测）。
+改模板后重跑同步；只改面板那条也可以直接 `ops/xiaoccctl start`（start 会按模板渲染覆盖安装份）。
 
 ## 3. 睡眠闸（为什么小cc 要管机器睡不睡）
 
@@ -69,9 +73,9 @@ ops/xiaoccctl logs err    # 看 stderr 末尾 40 行
 ops/xiaoccctl stop
 launchctl bootout "gui/$(id -u)/ai.hermes.mascot-pet.keepawake"        # 停守卫（可选）
 launchctl bootout "gui/$(id -u)/ai.hermes.xiaocc" 2>/dev/null          # 已停就忽略报错
-cp ops/baseline/ai.hermes.mascot-pet.keepawake.plist.bak ~/Library/LaunchAgents/ai.hermes.mascot-pet.keepawake.plist
+cp local/baseline/ai.hermes.mascot-pet.keepawake.plist.bak ~/Library/LaunchAgents/ai.hermes.mascot-pet.keepawake.plist
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.hermes.mascot-pet.keepawake.plist
-cp ops/baseline/ai.hermes.mascot-pet.plist.bak ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
+cp local/baseline/ai.hermes.mascot-pet.plist.bak ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
 launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
 ```
 
@@ -80,7 +84,9 @@ launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.hermes.mascot-pet.p
 
 ## 5. 取代小汐时留下的基线证据
 
-`ops/baseline/` 是动手前的原件（三个 plist）与 `baseline.txt`（当时 `launchctl list` / 进程 / 断言快照）。
+`local/baseline/` 是动手前的原件（三个 plist）与 `baseline.txt`（当时 `launchctl list` / 进程 / 断言快照）。
+**它们不进公开仓**（`local/` 已被 `.gitignore` 收口）：这些是小汐/MascotPet 的私有配置，不是小cc 的资产，
+所以外人 clone 到的公开仓里查不到 §4 回滚要用的那几个 `.bak` —— 那不是丢了，是刻意不发。
 `ops/xiaoccctl uninstall` 不在计划里 —— 要拆就按 §4 反着来，一步可逆。
 
 ## 6. arm（装回去）的门槛，与 ops 的测量方法
@@ -142,7 +148,7 @@ A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 过�
 **`ProcessType` 的结论（我这份 plist 的一行，已按 A/B 结果定住，别再顺手改）**：
 `Interactive` **保留** —— 换 `Adaptive` 是 16.6%，白换；整个删掉是 6.5% 但**圈速掉到 10.3/s（画面真卡了）**，
 门禁第二条本来就不放行。要降 CPU 只能改绘制路径（静态图层点阵化缓存），不是改这个键。
-理由与四臂数字已经写进 `ops/ai.hermes.xiaocc.plist` 的注释里（改 plist 记得 `cp` 同步安装份，否则 `doctor` ① 会报不一致）。
+理由与四臂数字已经写进 `ops/templates/ai.hermes.xiaocc.plist.in` 的注释里（改模板后跑 `ops/install.sh` 同步安装份，否则 `doctor` ① 会报不一致）。
 
 **跑任何自检/测试都要设 `XIAOCC_ANCHOR_FILE=<临时路径>`**：不设就会往真实锚点 `~/.xiaocc/anchor.json` 写假坐标，
 面板一 arm 就落在屏幕中间（codex 自测已犯过一次，留了个 (635,334) 的假锚点）。
@@ -159,7 +165,7 @@ A=$(ps -o time= -p "$PID"); sleep 60; B=$(ps -o time= -p "$PID")   # time= 过�
   **连续 3 次 > 8%** ⇒ `xiaoccctl stop` + `watchdog.log` + **`watchdog-stop.json` 留痕**（含最后一次 CPU、阈值、`rearm` 提示）。
   面板没在跑 ⇒ 连续计数清零、静默退出（脚本自己几秒就结束，不常驻）。**它不会自动把面板装回来**，修好要人 `arm`。
 * 文件：`~/Library/Logs/xiaocc/watchdog.log`、`watchdog.json`（当前连续计数 + 最近 9 次采样）、`watchdog-stop.json`（只在真动手停时写）。
-* **阈值可配置**：`ops/ai.hermes.xiaocc.watchdog.plist` 的 `EnvironmentVariables` ——
+* **阈值可配置**：`ops/templates/ai.hermes.xiaocc.watchdog.plist.in` 的 `EnvironmentVariables` ——
   `XIAOCC_WD_THRESHOLD`（默认 8，%）、`XIAOCC_WD_STREAK`（默认 3，连续次数）、`XIAOCC_WD_WINDOW`（默认 10，秒）。
   改完 `launchctl bootout` + `bootstrap` 重载，然后确认 launchd 真的把它交给了脚本：
   `launchctl print gui/$(id -u)/ai.hermes.xiaocc.watchdog | grep XIAOCC`

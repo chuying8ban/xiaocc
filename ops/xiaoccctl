@@ -6,7 +6,7 @@
 #
 # 怎么敲：
 #   ops/xiaoccctl status      # 一行摘要 + 日志尾巴；运行中退出 0，未运行退出 1
-#   ops/xiaoccctl start       # 幂等；plist 与仓库原件对齐后 bootstrap
+#   ops/xiaoccctl start       # 幂等；plist 与模板渲染结果对齐后 bootstrap
 #   ops/xiaoccctl stop        # bootout；本来就没跑也算成功
 #   ops/xiaoccctl restart
 #   ops/xiaoccctl doctor      # 自检 12 项（含「窗口是否真的在屏幕上」「自证据：圈速≈fps」）—— 人不在机器前时看这个
@@ -15,7 +15,7 @@
 #   ops/xiaoccctl logs [err]  # 看面板日志
 #
 # 文件在哪：
-#   plist        ~/Library/LaunchAgents/ai.hermes.xiaocc.plist（仓库原件在 ops/ 下，start 时会覆盖式同步）
+#   plist        ~/Library/LaunchAgents/ai.hermes.xiaocc.plist（模板在 ops/templates/ 下，start 时渲染后覆盖式同步）
 #   面板日志     ~/Library/Logs/xiaocc/panel.log、panel.err.log（各自 >200KB 覆盖式轮转成 .1）
 #   本脚本日志   ~/Library/Logs/xiaocc/xiaoccctl.log
 #   状态落盘     ~/Library/Logs/xiaocc/state.json（doctor/status/start/stop 都会刷新）
@@ -23,7 +23,7 @@
 # 回滚（30 秒内恢复旧桌宠，见 ops/README.md 第 4 节）：
 #   ops/xiaoccctl stop
 #   launchctl bootout "gui/$(id -u)/ai.hermes.mascot-pet"          # 若已 bootout 会报 not loaded，忽略
-#   cp ops/baseline/ai.hermes.mascot-pet.plist.bak ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
+#   cp local/baseline/ai.hermes.mascot-pet.plist.bak ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
 #   launchctl bootstrap "gui/$(id -u)" ~/Library/LaunchAgents/ai.hermes.mascot-pet.plist
 #
 # 静默约束：不弹任何窗（无 osascript / display dialog / alert），只走 stdout / stderr + 退出码。
@@ -39,8 +39,9 @@ LABEL="${XIAOCC_LABEL:-ai.hermes.xiaocc}"
 OLD_LABEL="ai.hermes.mascot-pet"
 GUARD_LABEL="${XIAOCC_GUARD_LABEL:-ai.hermes.mascot-pet.keepawake}"   # 睡眠闸守卫：名字留着，依赖已改成指向 xiaocc；可用环境变量接管以便沙箱验证
 DOMAIN="gui/$(id -u)"
-PLIST_SRC="${XIAOCC_PLIST_SRC:-$PROJECT_DIR/ops/ai.hermes.xiaocc.plist}"
 PLIST_DST="${XIAOCC_PLIST:-$HOME/Library/LaunchAgents/ai.hermes.xiaocc.plist}"
+PLIST_TPL="$PROJECT_DIR/ops/templates/ai.hermes.xiaocc.plist.in"
+RENDER="$PROJECT_DIR/ops/templates/render.py"
 LOGDIR="$HOME/Library/Logs/xiaocc"
 STATE="${XIAOCC_STATE:-$LOGDIR/state.json}"
 PANEL_LOG="$LOGDIR/panel.log"
@@ -101,6 +102,24 @@ except Exception: d={}
 print(d.get('paints_per_sec'))" 2>/dev/null; }
 _corner() { /usr/libexec/PlistBuddy -c 'Print :ProgramArguments:2' "$PLIST_DST" 2>/dev/null || print '?' }
 _installed() { [[ -f "$PLIST_DST" ]] }
+
+# 渲染面板 plist 只走 ops/templates/render.py（渲染逻辑唯一一份，zsh 里不再重复实现）。
+# python 选择：venv 那个在就用它；新 clone 还没建 venv 时退回系统 python3 —— 渲染是纯文本替换，哪个都行。
+_render_py() {
+  if [[ -x "$PY" ]]; then
+    print -r -- "$PY"; return 0
+  elif command -v python3 >/dev/null 2>&1; then
+    print -r -- "$(command -v python3)"; return 0
+  elif [[ -x /usr/bin/python3 ]]; then
+    print -r -- /usr/bin/python3; return 0
+  fi
+  return 1
+}
+_render_panel() {  # 渲染到 $PLIST_DST；传 --diff 时只比对不写（doctor ① 用）
+  local rpy
+  rpy="$(_render_py)" || { print -u2 "xiaoccctl: 找不到能跑渲染器的 python3"; return 4 }
+  "$rpy" "$RENDER" --repo-root "$PROJECT_DIR" --python "$PY" --log-dir "$LOGDIR" --home "$HOME" --out "$PLIST_DST" "$@" "$PLIST_TPL"
+}
 
 # 显示器醒睡 + 锁屏：门槛数字必须连同它一起记录 —— 屏幕睡着/锁着时 CoreAnimation 停画、
 # 别的进程的窗口根本不在屏上，CPU 天然偏低、像素判据也没法判读，两臂不可比。
@@ -308,7 +327,7 @@ _ensure_guard() {
 }
 
 cmd_start() {
-  [[ -f "$PLIST_SRC" ]] || { print -u2 "xiaoccctl: 仓库原件不存在：$PLIST_SRC"; return 3 }
+  [[ -f "$PLIST_TPL" ]] || { print -u2 "xiaoccctl: 模板不存在：$PLIST_TPL"; return 3 }
   _rotate "$PANEL_LOG"; _rotate "$PANEL_ERR"
   if _loaded && [[ -n "$(_pid)" ]]; then
     print "已在运行 (pid=$(_pid) 停靠点=$(_corner))"
@@ -316,7 +335,7 @@ cmd_start() {
     _ensure_guard
     _write_state ""; return 0
   fi
-  cp -f "$PLIST_SRC" "$PLIST_DST" || { print -u2 "xiaoccctl: 写 plist 失败"; return 4 }
+  _render_panel || { print -u2 "xiaoccctl: 渲染/写 plist 失败"; return 4 }
   _loaded && launchctl bootout "$DOMAIN/$LABEL" >/dev/null 2>&1   # 半死状态：先清干净
   local err
   err=$(launchctl bootstrap "$DOMAIN" "$PLIST_DST" 2>&1); local rc=$?
@@ -406,10 +425,10 @@ cmd_status() {
 cmd_doctor() {
   local fail=0
   print "== 小cc 自检 $(date '+%F %T') =="
-  if [[ -f "$PLIST_SRC" ]] && cmp -s "$PLIST_SRC" "$PLIST_DST"; then
-    print "✓ ① plist 已安装且与仓库原件一致"
+  if _render_panel --diff >/dev/null 2>&1; then
+    print "✓ ① plist 已安装且与模板渲染结果一致"
   else
-    print "✗ ① plist 缺失或与仓库不一致（$PLIST_DST）"; fail=1
+    print "✗ ① plist 缺失或与模板渲染结果不一致（$PLIST_DST）"; fail=1
   fi
   if [[ -x "$ENTRY" ]] && [[ -x "$PY" ]]; then
     print "✓ ② venv 入口可执行"

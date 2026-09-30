@@ -9,7 +9,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/zsh</string>
-		<string>/Users/a29285/ChenC/项目/xiaocc/ops/xiaocc_watchdog.sh</string>
+		<string>@REPO_ROOT@/ops/xiaocc_watchdog.sh</string>
 	</array>
 
 	<key>StartInterval</key>
@@ -35,8 +35,8 @@
 	</dict>
 
 	<key>StandardOutPath</key>
-	<string>/Users/a29285/Library/Logs/xiaocc/watchdog.out.log</string>
+	<string>@LOG_DIR@/watchdog.out.log</string>
 	<key>StandardErrorPath</key>
-	<string>/Users/a29285/Library/Logs/xiaocc/watchdog.err.log</string>
+	<string>@LOG_DIR@/watchdog.err.log</string>
 </dict>
 </plist>

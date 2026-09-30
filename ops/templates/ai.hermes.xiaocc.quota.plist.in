@@ -10,13 +10,13 @@
   <string>ai.hermes.xiaocc.quota</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/Users/a29285/ChenC/项目/xiaocc/.venv/bin/python</string>
+    <string>@PYTHON@</string>
     <string>-m</string>
     <string>xiaocc.quota</string>
     <string>refresh</string>
   </array>
   <key>WorkingDirectory</key>
-  <string>/Users/a29285/ChenC/项目/xiaocc</string>
+  <string>@REPO_ROOT@</string>
   <key>EnvironmentVariables</key>
   <dict>
     <key>PYTHONUNBUFFERED</key>
@@ -35,8 +35,8 @@
   <key>ThrottleInterval</key>
   <integer>60</integer>
   <key>StandardOutPath</key>
-  <string>/Users/a29285/Library/Logs/xiaocc/quota.out.log</string>
+  <string>@LOG_DIR@/quota.out.log</string>
   <key>StandardErrorPath</key>
-  <string>/Users/a29285/Library/Logs/xiaocc/quota.err.log</string>
+  <string>@LOG_DIR@/quota.err.log</string>
 </dict>
 </plist>

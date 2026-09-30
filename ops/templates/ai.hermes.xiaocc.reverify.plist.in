@@ -13,7 +13,7 @@
 	<key>ProgramArguments</key>
 	<array>
 		<string>/bin/zsh</string>
-		<string>/Users/a29285/ChenC/项目/xiaocc/ops/xiaocc_reverify.sh</string>
+		<string>@REPO_ROOT@/ops/xiaocc_reverify.sh</string>
 	</array>
 
 	<key>RunAtLoad</key>
@@ -34,8 +34,8 @@
 	</dict>
 
 	<key>StandardOutPath</key>
-	<string>/Users/a29285/Library/Logs/xiaocc/reverify.out.log</string>
+	<string>@LOG_DIR@/reverify.out.log</string>
 	<key>StandardErrorPath</key>
-	<string>/Users/a29285/Library/Logs/xiaocc/reverify.err.log</string>
+	<string>@LOG_DIR@/reverify.err.log</string>
 </dict>
 </plist>
