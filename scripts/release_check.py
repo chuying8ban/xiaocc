@@ -24,7 +24,8 @@
 #6 图片尺寸≈屏幕（🟡）／ #7 体积 >300KB（🟡）／ #8 许可文件在位（🟡）。
 #9 重写前置条件（🔴）：有 remote 且 `origin/HEAD` 存在 ⇒ 重写要 force-push，所有 clone 全废。
 #10 去人称（🔴）：已发布文件里不许出现内部工作流代号（lead / coder / ops / researcher / writer / 裸 user）。
-#11 点名提交可解析（🔴 .md / 🟡 scripts/*.py）：已发布文件里逐字点名的提交，必须能在本仓解析。
+#11 点名提交可解析（🔴 .md / 🟡 scripts/*.py）：已发布文件里逐字点名的提交必须能在本仓解析；
+#   退役表「取回用的提交」那一格还必须在那个提交里真的取得到那张图，且是**最后动过它**的提交。
 
 范围一律是**会被发布的文件**（`git ls-files`）：`docs/evidence/*.desktop.png` 在
 `.gitignore` 里、永远不发布，把它报出来就是假红（文件系统遍历会连 `.DS_Store` 一起捞进来）。
@@ -956,6 +957,126 @@ def in_commit_ref_context(line: str, token: str) -> bool:
     return any(word in line for word in REF_CONTEXT_WORDS)
 
 
+#: 表格里「取回用的提交」那一格的形状：**整格**只有一个反引号包着的提交号。
+#: 只认整格是必需的：状态列里也会出现反引号包着的提交号（那是退役理由的一部分，不是指针），
+#: 按「行里所有提交号」去核就会连理由一起判红 —— 那是假红。
+POINTER_CELL_RE = re.compile(r"^`([0-9a-f]{7,40})`$")
+
+
+def retired_row_targets(
+    relpath: str, text: str, known_basenames: frozenset[str]
+) -> list[tuple[str, str, str | None]]:
+    """表格行点到「工作树里已经不在的图」时，返回 [(名字, 仓库相对路径, 取回指针或 None)]。
+
+    三个收口，每一个都是实测踩出来的假红：
+
+    * 只认 `.md`：退役指针表是**文档**的承诺。`scripts/shoot_design_shots.py` 的模块
+      docstring 里也有一张 `*.png` 表格（那是拍摄清单，名字相对**输出目录**），
+      按指针去核就是把拍摄清单判红。
+    * 只认**整个仓库里都找不到**的 basename：跨目录互相点名是常态
+      （`docs/evidence/README.md` 点名 `docs/design/` 里的图），
+      只看「相对本文件所在目录存在与否」会把它们误判成退役图。
+    * 只认表格行，且活图行不算：活图索引里也写了提交号，但那是「什么时候拍的」，
+      不是「去哪一版取回」。
+    """
+    if not relpath.endswith(".md") or not text.lstrip().startswith("|"):
+        return []
+    base = os.path.dirname(relpath)
+    pointer: str | None = None
+    for cell in text.strip().strip("|").split("|"):
+        found = POINTER_CELL_RE.match(cell.strip())
+        if found:
+            pointer = found.group(1)
+            break
+    targets: list[tuple[str, str, str | None]] = []
+    for name in BACKTICK_RE.findall(text):
+        if not name.lower().endswith(".png"):
+            continue
+        if os.path.basename(name) in known_basenames:
+            continue  # 还在版控里：这是活图索引行，不是退役指针
+        path = os.path.normpath(os.path.join(base, name))
+        targets.append((name, path, pointer))
+    return targets
+
+
+def check_retired_rows(
+    root: str,
+    report: Report,
+    relpath: str,
+    lineno: int,
+    text: str,
+    ref_types: dict[str, tuple[int, str]],
+    known_basenames: frozenset[str],
+) -> int:
+    """退役表那一行的可核承诺：指针要取得到那张图，而且是**最后动过它**的提交。
+
+    为什么按「最后动过」核、而不是只核「取得到」：任何后代提交里这张图都还在，
+    所以随便指一个更晚的提交也能 `git show` 出来 —— 但拿回来的是**更晚那一版**，
+    表下那句「那一版里最后动过这张图的提交」就成了假话。指到更早的提交同理。
+    口径由文档自己写死在表下，判据只是把它变成机器能验的东西。
+    """
+    problems = 0
+    for name, path, pointer in retired_row_targets(relpath, text, known_basenames):
+        if pointer is None:
+            report.fail(
+                relpath,
+                lineno,
+                f"退役图 {name} 没给「取回用的提交」：这一节的口径是名字 + 退役原因 + 那一版里的提交",
+                text,
+            )
+            problems += 1
+            continue
+        key = f"{pointer}:{path}"
+        if key not in ref_types:
+            ref_types[key] = git_capture(root, "cat-file", "-t", key)
+        rc, out = ref_types[key]
+        if rc == 127:
+            report.warn("<git cat-file>", 0, "git 不可用，退役表的取回指针无法解析")
+            return problems + 1
+        if rc != 0:
+            report.fail(
+                relpath,
+                lineno,
+                f"取回用的提交里没有这张图：git cat-file -t {key} 取不到",
+                text,
+            )
+            problems += 1
+            continue
+        if out.strip() != "blob":
+            report.fail(
+                relpath,
+                lineno,
+                f"{key} 不是文件：git cat-file -t 返回 {out.strip()}",
+                text,
+            )
+            problems += 1
+            continue
+        rc_log, last = git_capture(
+            root, "log", "-1", "--diff-filter=AMRC", "--format=%H", "HEAD", "--", path
+        )
+        last = last.strip()
+        if rc_log != 0 or not last:
+            report.fail(
+                relpath,
+                lineno,
+                f"历史里找不到动过 {path} 的提交，证不了这个取回指针",
+                text,
+            )
+            problems += 1
+            continue
+        if not last.startswith(pointer):
+            report.fail(
+                relpath,
+                lineno,
+                f"取回用的提交不是最后动过这张图的提交：口径要求 {last[:7]}，表里写的是 {pointer}",
+                text,
+            )
+            problems += 1
+            continue
+        report.ok(relpath, lineno, f"{name}：{pointer} 里取得到，且是最后动过它的提交")
+    return problems
+
+
 def check_doc_commit_refs(root: str, report: Report) -> None:
     """#11（🔴 .md / 🟡 scripts/*.py）已发布文件里逐字点名的提交，必须能在本仓解析。
 
@@ -963,11 +1084,14 @@ def check_doc_commit_refs(root: str, report: Report) -> None:
     扫它就是「守卫把守卫自己的测试判红」那类假红（同判据①、#10 已有的豁免口径）。
     同一个 token 的 `git cat-file -t` 结果缓存复用，仓库里点同一提交多处的只查一次。
     """
-    report.section("判据 #11 点名提交可解析：已发布 .md / .py 里点名的提交必须在仓库里可解析")
+    report.section("判据 #11 点名提交可解析：点名的提交要能解析，退役表的取回指针还要取得到那张图")
     resolved_types: dict[str, tuple[int, str]] = {}
+    published = published_files(root)
+    #: 已发布文件的 basename：判「这张图还在不在版控里」，跨目录点名也认得出是活图。
+    known_basenames = frozenset(os.path.basename(path) for path in published)
     hits = 0
     problems = 0
-    for relpath in published_files(root):
+    for relpath in published:
         if not relpath.endswith((".md", ".py")):
             continue
         if relpath.startswith("tests/") and relpath.endswith(".py"):
@@ -1004,8 +1128,11 @@ def check_doc_commit_refs(root: str, report: Report) -> None:
                     text,
                 )
                 problems += 1
+            problems += check_retired_rows(
+                root, report, relpath, lineno, text, resolved_types, known_basenames
+            )
     if not problems:
-        report.ok("<已发布文件>", 0, f"{hits} 处提交引用全部可解析")
+        report.ok("<已发布文件>", 0, f"{hits} 处提交引用全部可解析（含退役表的取回指针）")
 
 
 def existing_dir(value: str) -> str:

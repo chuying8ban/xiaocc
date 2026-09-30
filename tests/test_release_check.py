@@ -573,3 +573,130 @@ def test_dead_commit_ref_in_scripts_is_warn(
     rc, out = run_check(root, capsys)
     assert rc == 0, out
     assert "WARN scripts/appkit_screenshots.py:1  点名了不存在的提交 0badc0d：git cat-file -t 取不到" in out
+
+
+# ——————————————————————————————————————————————————————————————————————————————
+# #11 后半段：退役表「取回用的提交」——那个提交里要真取得到那张图，
+# 且必须是**最后动过它**的提交（表下自己写的口径，判据只是把它变成能机器验的东西）。
+# ——————————————————————————————————————————————————————————————————————————————
+
+
+def _commit_all(root: Path, message: str) -> str:
+    """把仓库现有改动提交掉，返回完整 SHA。"""
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", message)
+    return git(root, "rev-parse", "HEAD").strip()
+
+
+def _design_repo(tmp_path: Path, *, with_shot: bool) -> Path:
+    """最小仓库 + 一个 docs/design/（要被判据④从 README 走到）。"""
+    files: dict[str, str | bytes] = dict(BASE_FILES)
+    files["README.md"] = "# t\n\n[设计记录](docs/design/README.md)\n"
+    files["docs/design/README.md"] = "# 设计\n"
+    if with_shot:
+        files["docs/design/旧图.png"] = make_png(4, 4, blank=False)
+    return make_repo(tmp_path, files)
+
+
+def _write_retired_row(root: Path, pointer: str) -> None:
+    """写成退役表：那张图已经不在工作树里，取回指针是 `pointer`。"""
+    (root / "docs/design/README.md").write_text(
+        "# 设计\n\n"
+        "| 文件 | 内容 | 状态 | 取回用的提交 |\n"
+        "| --- | --- | --- | --- |\n"
+        f"| `旧图.png` | 早期界面 | 已退役（被新版取代） | `{pointer}` |\n",
+        encoding="utf-8",
+    )
+
+
+def test_retired_pointer_is_green(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """指针指对了（那一版里取得到，且是最后动过它的提交）⇒ 绿。"""
+    root = _design_repo(tmp_path, with_shot=True)
+    keep = git(root, "rev-parse", "HEAD").strip()  # 建仓那次提交就是「留下这张图的那一版」
+    git(root, "rm", "-q", "docs/design/旧图.png")
+    _commit_all(root, "退役：图不留在工作树")
+    _write_retired_row(root, keep[:7])
+    _commit_all(root, "退役表")
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert f"旧图.png：{keep[:7]} 里取得到，且是最后动过它的提交" in out
+
+
+def test_retired_pointer_at_older_commit_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """指到更早的提交：图照样 `git show` 得出来，但不是最后动过它的那一版 ⇒ 红。
+
+    实仓就是这个形状：指到「退役理由」那个提交（它只是又往后走了一步），
+    能解析、能取回，但表下那句「最后动过这张图的提交」是假的。
+    """
+    root = _design_repo(tmp_path, with_shot=True)
+    early = git(root, "rev-parse", "HEAD").strip()  # 建仓那次提交留下的就是第一版截图
+    (root / "docs/design/旧图.png").write_bytes(make_png(6, 6, blank=False))
+    last = _commit_all(root, "重拍了一版")
+    git(root, "rm", "-q", "docs/design/旧图.png")
+    _commit_all(root, "退役：图不留在工作树")
+    _write_retired_row(root, early[:7])
+    _commit_all(root, "退役表")
+    rc, out = run_check(root, capsys)
+    assert rc == 1
+    assert (
+        f"取回用的提交不是最后动过这张图的提交：口径要求 {last[:7]}，表里写的是 {early[:7]}" in out
+    )
+
+
+def test_retired_pointer_without_the_file_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """指到这张图还不存在的那一版 ⇒ 红：这一节承诺的是「一条命令取回」。"""
+    root = _design_repo(tmp_path, with_shot=False)
+    before = git(root, "rev-parse", "HEAD").strip()
+    (root / "docs/design/旧图.png").write_bytes(make_png(4, 4, blank=False))
+    _commit_all(root, "加图")
+    git(root, "rm", "-q", "docs/design/旧图.png")
+    _commit_all(root, "退役：图不留在工作树")
+    _write_retired_row(root, before[:7])
+    _commit_all(root, "退役表")
+    rc, out = run_check(root, capsys)
+    assert rc == 1
+    assert (
+        f"取回用的提交里没有这张图：git cat-file -t {before[:7]}:docs/design/旧图.png 取不到" in out
+    )
+
+
+def test_py_docstring_table_is_not_read_as_a_pointer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """假红守卫：`.py` 模块 docstring 里的 `*.png` 表格（拍摄清单，名字相对输出目录）不是指针表。
+
+    实仓踩到的就是这条：`scripts/shoot_design_shots.py` 的 docstring 里有一张 11 行的拍摄清单表，
+    那些名字是写入 `docs/design/` 的，相对脚本目录当然找不到 —— 按指针核就是 11 条假红。
+    """
+    root = _design_repo(tmp_path, with_shot=False)
+    (root / "scripts/shoot_demo.py").write_text(
+        "# 拍摄清单\n\n| 文件名 | how |\n| --- | --- |\n| `没拍过.png` | window |\n",
+        encoding="utf-8",
+    )
+    _commit_all(root, "拍摄清单")
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert "没给「取回用的提交」" not in out
+
+
+def test_live_image_row_is_not_read_as_a_pointer(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """假红守卫：活图索引行里也有提交号（那是「什么时候拍的」），不许被当成退役指针。"""
+    root = _design_repo(tmp_path, with_shot=True)
+    head = git(root, "rev-parse", "HEAD").strip()  # 图还在工作树里：这一行是活图索引
+    (root / "docs/design/README.md").write_text(
+        "# 设计\n\n"
+        "| 文件 | 拍摄时间 |\n"
+        "| --- | --- |\n"
+        f"| `旧图.png` | 2026-09-30 00:30 · 工作树（`{head}` 之后） |\n",
+        encoding="utf-8",
+    )
+    _commit_all(root, "活图索引")
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert "没给「取回用的提交」" not in out
