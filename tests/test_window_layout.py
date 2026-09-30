@@ -445,6 +445,7 @@ def test_bubble_budget_has_one_source_of_truth():
     或选中后被截成半句话。所以窗口宽走 ``window_size_for``、内边距/内缩各只有一处常量，
     两个数必然一起动；谁再另写一个数，这条就红。
     """
+    pytest.importorskip("AppKit", reason="这条量的是显示层的常量，需要 pyobjc（`.[macos]` 额外依赖）")
     from xiaocc.backends.appkit import bubble_budget_for, bubble_text_width_for
     from xiaocc.characters import load_character
 

@@ -20,6 +20,11 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - name: 安装
         run: python -m pip install -e ".[dev]"
+      # 显示层（pyobjc/Cocoa）只在 macOS 上装得到：装上它，气泡宽度那条断言才会在
+      # macOS 格子里**真跑**；别的系统上它会自己 skip（skip ≠ 假装通过）。
+      - name: 安装（macOS 额外装显示层）
+        if: runner.os == 'macOS'
+        run: python -m pip install -e ".[macos]"
       - name: 核心测试（不依赖图形库）
         run: python -m pytest -q
       # 这里不再跑 `xiaocc run --source hermes --backend console --once`：

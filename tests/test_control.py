@@ -30,6 +30,10 @@ def test_unknown_action_raises() -> None:
         control.ctl_argv("nuke")
 
 
+@pytest.mark.skipif(
+    not Path("/bin/zsh").exists(),
+    reason="control 用 /bin/zsh 起 xiaoccctl（macOS 自带）；别的系统上这个 shell 不存在，跑不了这条缝",
+)
 def test_override_dry_run_and_mark_are_a_clean_seam(tmp_path, monkeypatch) -> None:
     calls = tmp_path / "calls.txt"
     stub = tmp_path / "stub.sh"

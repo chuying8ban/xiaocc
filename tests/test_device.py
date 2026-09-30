@@ -5,7 +5,10 @@
 
 from __future__ import annotations
 
+import sys
 import time
+
+import pytest
 
 from xiaocc.device import (
     Device,
@@ -179,6 +182,17 @@ def test_lines_shape() -> None:
     assert rows["已开机"] == "1 天 10 小时"
 
 
+#: 下面三条断言要的是**macOS 的真读数**（`sysctl` / `vm_stat` / `pmset`）。
+#: 核心零依赖、别的系统上没有这套实现时 `Device` 会诚实地把字段留成 `None`（不假装有数），
+#: 于是这些断言在那类 runner 上必红 —— 红的是「平台没这个实现」，不是代码坏了。
+#: 所以按平台跳过并写明原因；**不许改松断言**（改松会让 macOS 上的真回归也一起变绿）。
+_NEEDS_MACOS_READINGS = pytest.mark.skipif(
+    sys.platform != "darwin",
+    reason="真读数只有 macOS 实现（sysctl/vm_stat/pmset）；别的系统上这些字段诚实地是 None",
+)
+
+
+@_NEEDS_MACOS_READINGS
 def test_cpu_ratio_needs_two_samples() -> None:
     """第一次问没有基线 ⇒ CPU 写「未取到」，不许拿累计值当利用率。"""
     from xiaocc.device import snapshot
@@ -188,6 +202,7 @@ def test_cpu_ratio_needs_two_samples() -> None:
     assert device.mem_total and device.mem_total > 1024**3  # 内存总量总是能取到
 
 
+@_NEEDS_MACOS_READINGS
 def test_sampler_waits_once_so_first_reading_has_cpu() -> None:
     """冷启动第一次问（窗口不足 0.5s）要**等够再采**，否则面板/菜单第一眼就是「CPU 未取到」。"""
     from xiaocc.device import Sampler
@@ -243,6 +258,7 @@ def test_frozen_counter_is_not_papered_over_by_a_blocking_retry(monkeypatch) -> 
     assert elapsed < device_mod._MIN_CPU_WINDOW_S + 0.4  # 只等了窗口，没有额外重试预算
 
 
+@_NEEDS_MACOS_READINGS
 def test_sampler_without_wait_returns_at_once_and_does_not_poison_the_cache() -> None:
     """首帧那条路（`wait=False`）：立刻返回、CPU 空着，而且**不许把这一份缓存起来**。
 
