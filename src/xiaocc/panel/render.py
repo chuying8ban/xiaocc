@@ -106,7 +106,7 @@ def _device_block(dev: Any, *, wait_remaining: float = 0.0) -> dict[str, Any]:
     cpu_missing = dev.cpu_percent is None
     pending = cpu_missing and wait_remaining > 0.0
     if pending:
-        # 「采集中」**不带省略号**（@writer 量的：唯一的紧候选 `CPU 采集中 · 内存 未取到`
+        # 「采集中」**不带省略号**（唯一的紧候选 `CPU 采集中 · 内存 未取到`
         # 128.6px / 预算 132，加省略号就 137.5px 直接超预算；省略号一个字节信息都没多给）
         rows = [[title, "采集中" if title == "CPU" else value] for title, value in rows]
     return {

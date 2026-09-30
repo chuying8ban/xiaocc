@@ -1,4 +1,4 @@
-"""`scripts/release_check.py` 规格表 #1–#9 的反向控制（每条都得能被现造样本判红）。
+"""`scripts/release_check.py` 规格表 #1–#10 的反向控制（每条都得能被现造样本判红）。
 
 本仓规矩是「不许只写不验」：一条判据如果没人证明过它会红，那它绿不绿就没有信息量。
 这里在 `tmp_path` 里**现搭一个最小 git 仓库**（造样本 → 跑 → 看 rc / 看那一行 → 目录自己清掉），
@@ -28,7 +28,7 @@ import release_check
 CLEAN_EMAIL = "t@example.com"
 CLEAN_NAME = "T"
 
-#: 一个「除了被测那一项之外全绿」的最小仓库。判据 #1–#9 之外还要过 ①–④：
+#: 一个「除了被测那一项之外全绿」的最小仓库。判据 #1–#10 之外还要过 ①–④：
 #: 所以得有文档目录（① 需要）、入口 md（④ 需要）、13 支门禁脚本（③ 需要）。
 BASE_FILES: dict[str, str | bytes] = {
     "README.md": "# t\n",
@@ -443,3 +443,59 @@ def test_remote_with_origin_head_is_red(
     assert rc == 1
     assert "FAIL <git remote>:0  有 remote 且 origin/HEAD 存在" in out
     assert "force-push" in out
+
+
+# ——————————————————————————————————————————————————————————————————————————————
+# #10 去人称（🔴）
+# ——————————————————————————————————————————————————————————————————————————————
+
+#: 样本里的真代号用拼接造：直接把「@」和代号连写，会把本测试文件自己判红（判据 #10 扫全仓）。
+_LEAD = "@" + "lead"
+_CODER = "@" + "coder"
+
+
+def test_internal_handle_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    files = dict(BASE_FILES)
+    files["ops/run-panel.sh"] = f"# 门槛：CPU < 5%（{_LEAD} 定的）\n"
+    root = make_repo(tmp_path, files)
+    rc, out = run_check(root, capsys)
+    assert rc == 1
+    assert f"FAIL ops/run-panel.sh:1  出现内部工作流代号：{_LEAD}" in out
+
+
+def test_noreply_github_email_is_not_a_handle(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`@users.noreply.github.com` 这种邮箱不带词边界时不许被判成代号（没有 `\b` 就会假红）。"""
+    files = dict(BASE_FILES)
+    files["conf/meta.py"] = 'AUTHOR = "158806394+chuying8ban@users.noreply.github.com"\n'
+    root = make_repo(tmp_path, files)
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert "FAIL conf/meta.py" not in out
+
+
+def test_rule_describing_handle_line_is_exempt(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """讲「去人称」规矩的行会点名代号，必须豁免并打印（不许静默放过）。"""
+    files = dict(BASE_FILES)
+    files["conf/rules.md"] = f"# 去人称：已发布文件不出现 {_LEAD} / {_CODER} 这类内部代号\n"
+    root = make_repo(tmp_path, files)
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert "讲去人称规则的行，豁免" in out
+
+
+def test_handle_scan_covers_src_not_just_docs(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """范围必须是全仓（`git ls-files`）：src/ 下的代号同样要判红，不是只扫 docs/。"""
+    files = dict(BASE_FILES)
+    files["src/xiaocc/quota/badge.py"] = f"# 实测（{_CODER}）：四舍五入到 5%\n"
+    root = make_repo(tmp_path, files)
+    rc, out = run_check(root, capsys)
+    assert rc == 1
+    assert f"FAIL src/xiaocc/quota/badge.py:1  出现内部工作流代号：{_CODER}" in out

@@ -240,7 +240,7 @@ def check_drag_watchdog(backend, number: int, real_button_down) -> None:
         f"_dragging={backend._dragging}",
     )
 
-    # ⑥ 另一半反向控制：**程序化 API 不许被兜底收掉**（@lead 找到的那条回归）——
+    # ⑥ 另一半反向控制：**程序化 API 不许被兜底收掉**（那条回归）——
     #    start_drag() 只是「等价于按下」，这条路上没有真按钮，兜底必须放过它。
     #    去掉 from_mouse 区分时这条会红，而 verify_drag_tracking.py --real 也会跟着红。
     backend.start_drag()
@@ -474,7 +474,7 @@ def check_click_gestures(backend, number: int, cursor: list) -> None:
         f"留痕={lines}",
     )
 
-    # —— ⑱~㉑ 气泡：两行、每行放得下、5 秒、淡化（@researcher 那个「看不出错、只是没效果」的坑）——
+    # —— ⑱~㉑ 气泡：两行、每行放得下、5 秒、淡化（「看不出错、只是没效果」的坑）——
     settings_store.save({"click_action": "badge"}, Path(os.environ["XIAOCC_SETTINGS_FILE"]))
     backend._reload_settings(force=True)
     backend._hide_badge()

@@ -386,7 +386,7 @@ def open_panel(
             # 而且每次打开面板都要再付一次）。那一格先写「采集中」，基线够了再渲染一遍填真数。
             web.loadHTMLString_baseURL_(self.render_now(device_wait=False), None)
             # 补帧的判据是「**这一帧的 CPU 是空的**」，不是「等一会儿就能有」：计数器恰好在窗口
-            # 那一刻卡住时（@coder 那条残留边界）只有按前者才会补，否则那一屏永久停在「未取到」。
+            # 那一刻卡住时（那条残留边界）只有按前者才会补，否则那一屏永久停在「未取到」。
             fill_delay = device_wait_remaining()
             if fill_delay > 0 or first_paint["cpu_missing"]:
                 AppKit.NSTimer.scheduledTimerWithTimeInterval_target_selector_userInfo_repeats_(

@@ -1,5 +1,5 @@
 #!/bin/zsh
-# 小cc CPU 看门狗 —— 与屏幕状态无关的**运行时**保护（@lead 定：优先级高于门禁美化）
+# 小cc CPU 看门狗 —— 与屏幕状态无关的**运行时**保护（优先级高于门禁美化）
 #
 # 为什么不能只靠 `arm` 的门禁：门禁是**一次性**部署检查，而且判据②在屏幕睡着/锁屏时根本判读不了。
 # 「人不在机器前、面板偷偷烧一整天」只能靠周期性采样来防。
@@ -322,7 +322,7 @@ fi
 _write_state "$STREAK" "$CPU" "" "$DISP"
 
 if (( STREAK >= STREAK_LIMIT )); then
-  say "连续 ${STREAK} 次超 ${THRESHOLD}% ⇒ 停掉面板（@lead 定的运行时保护）"
+  say "连续 ${STREAK} 次超 ${THRESHOLD}% ⇒ 停掉面板（运行时保护）"
   "$PY" - "$MARK" "$PID" "$CPU" "$STREAK" "$THRESHOLD" "$WINDOW" <<'PYEOF' 2>/dev/null
 import json, sys, time, pathlib
 mark, pid, cpu, streak, thr, window = sys.argv[1:7]

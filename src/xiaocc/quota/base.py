@@ -47,7 +47,7 @@ def hermes_env_file() -> Path:
     """密钥文件：默认那份 `.env`；沙箱里跟着替身家目录走。"""
     return hermes_dir() / ".env"
 
-#: 账本：默认库 + **每个** profile 自己的 state.db（@writer/@researcher 实测只读默认库会漏约 41%）
+#: 账本：默认库 + **每个** profile 自己的 state.db（实测只读默认库会漏约 41%）
 #:
 #: **不要在代码里写死 profile 名单**（这里原来是写死的 5 个名字，面板那边还写死"全部 6 库"）：
 #: 新建或改名一个 profile 就会**静默漏掉**它的账本，页面照样说"全部 6 库"、一个错都不报。

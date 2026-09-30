@@ -68,7 +68,7 @@ def test_first_ok_service_wins_and_units_are_mapped() -> None:
 
 
 def test_unknown_unit_goes_after_the_number() -> None:
-    """认不出货币就**后置**：`credits5.00` 既没空格也没符号，是字面 bug（@writer 抓的）。
+    """认不出货币就**后置**：`credits5.00` 既没空格也没符号，是字面 bug（抓的）。
 
     千问云 Token Plan 的 `Credits` 一登录就是主家，DeepSeek 的 CNY→¥ 一直把这条盖着。
     """
@@ -82,7 +82,7 @@ def test_known_currency_still_uses_the_symbol() -> None:
 
 
 def test_credits_bubble_lines_stay_readable() -> None:
-    """@writer 量的字面（11pt 真字体、气泡每行上限 153px）：`Credits1200.00 · 9 分钟前`
+    """量的字面（11pt 真字体、气泡每行上限 153px）：`Credits1200.00 · 9 分钟前`
     拆两行后每行都读得完，第一行不许断在半句话中间。"""
     rep = report(service("千问云 Token Plan", "ok", {"value": 1200.0, "unit": "Credits"}))
     lines = badge_bubble_candidates(rep, ok_meta(540.0))[0]

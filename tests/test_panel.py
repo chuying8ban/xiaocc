@@ -90,8 +90,8 @@ def test_陈锁会过期(sandbox, monkeypatch):
 def test_rendered_page_has_no_markdown_in_what_the_user_reads(tmp_path) -> None:
     """渲染后的**正文**里不许有 Markdown（``**`` / 反引号）—— 静态 HTML 不跑 Markdown，会原样上屏。
 
-    实拍：`两个按钮都要**点两下**` 就这么送到了用户眼前（2026-09-29 @writer 抓的）。
-    必须**先剥掉 ``<style>``/``<script>`` 再找**（@researcher 的实测教训：不剥就是永久红 ——
+    实拍：`两个按钮都要**点两下**` 就这么送到了用户眼前（2026-09-29 抓的）。
+    必须**先剥掉 ``<style>``/``<script>`` 再找**（实测教训：不剥就是永久红 ——
     CSS/JS 注释里本来就有 ``**`` 和反引号），否则这条判据守不住东西还天天亮红灯。
     """
     payload = render.build_payload(
@@ -132,7 +132,7 @@ def test_user_visible_strings_in_code_carry_no_markdown() -> None:
 
     实拍两处：面板注里的 `**点两下**`，和千问那条「未安装官方 CLI `qianwen`」（静态 HTML 不跑
     Markdown ⇒ 反引号原样送到眼前）。用 ``ast`` 只认「这些关键字参数里的字面量 + 同类模块常量」，
-    所以 docstring 里的 ``反引号`` 不会误伤（@researcher 的实测教训：不剥注释/文档的扫描会永久红）。
+    所以 docstring 里的 ``反引号`` 不会误伤（实测教训：不剥注释/文档的扫描会永久红）。
     """
     offenders: list[str] = []
     for path in sorted((SRC / "xiaocc").rglob("*.py")):
@@ -185,7 +185,7 @@ def test_device_block_says_collecting_when_the_baseline_is_too_young() -> None:
         Device(taken_at=0.0, cpu_percent=None, mem_used=1, mem_total=2), wait_remaining=0.6
     )
     assert young["pending"] is True
-    # 措辞**不带省略号**（@writer 量的：唯一的紧候选 `CPU 采集中 · 内存 未取到` 128.6px /
+    # 措辞**不带省略号**（唯一的紧候选 `CPU 采集中 · 内存 未取到` 128.6px /
     # 预算 132，加省略号 137.5px 直接超预算，而省略号一个字节的信息都没多给）
     assert dict(young["rows"])["CPU"] == "采集中"
 

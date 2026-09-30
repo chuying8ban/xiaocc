@@ -286,7 +286,7 @@ def main() -> int:
         NSTimer.scheduledTimerWithTimeInterval_repeats_block_(0.6, False, step11)
 
     def step11(_t=None) -> None:
-        """⑫面板**正文**不许横向被裁（@researcher 量到过两处：千问 hint 68px、百炼 11px）。
+        """⑫面板**正文**不许横向被裁（量到过两处：千问 hint 68px、百炼 11px）。
 
         口径三条，都是别处吃过亏换来的：**只看横向**（竖向会被 line-height/基线差咬出 2–4px 假溢出）；
         **量 JS 跑完之后的 DOM**（今天两次栽在同一层：剥 `<style>` 扫模板会漏掉 JS 渲染出来的文本）；

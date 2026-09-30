@@ -36,7 +36,7 @@ class ConsoleOnlyAdapter:
 
 
 def default_consoles() -> list[ConsoleOnlyAdapter]:
-    """@researcher 核实过的、本机没有合法取数路径的那几家。
+    """核实过的、本机没有合法取数路径的那几家。
 
     （千问云 Token Plan 曾经也在这里，现在有自己的适配器了 —— 它走官方 CLI，
     见 :mod:`xiaocc.quota.qianwen`。）

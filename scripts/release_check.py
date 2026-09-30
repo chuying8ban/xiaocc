@@ -4,8 +4,8 @@
 它**不回答「门禁是不是绿的」**——运行时是否通过由本机日志回答，日志不进仓库，
 否则把某一次运行结果写进版本库，又是一次「承诺超出事实」。
 
-前四条判据查「文档声明 ↔ 仓库事实」，后面九条是本文件模块 docstring 里那张规格表
-#1–#9 的逐条落地（规格与实现同文件，避免指向仓库外的文档）。全部只读仓库、不跑被测程序：
+前四条判据查「文档声明 ↔ 仓库事实」，后面十条是本文件模块 docstring 里那张规格表
+#1–#10 的逐条落地（规格与实现同文件，避免指向仓库外的文档）。全部只读仓库、不跑被测程序：
 
 ① 措辞：仓库根 `docs/` 下递归所有 `.md` 与仓库根 `ASSET_LICENSE.md` 里，
    来源声明不许出现 BAD_WORDS（自绘 / 纯手绘 / 手工绘制）。
@@ -14,7 +14,7 @@
 ③ 护栏：文档里逐字点名的 13 支门禁脚本，必须还在 `scripts/` 下（防未来改名 / 删除）。
 ④ 可达性：`docs/` 下每个文件都得能从 `README.md` / `README_EN.md` 顺着链接走到。
 
-规格表 #1–#9（红线 #1/#2/#3/#5/#9 判 🔴，其余 🟡 只提醒、不影响退出码）：
+规格表 #1–#10（红线 #1/#2/#3/#5/#9/#10 判 🔴，其余 🟡 只提醒、不影响退出码）：
 
 #1 历史身份：提交历史里不许出现本机用户名 / 主机名兜底邮箱（唯一「发出去就难改」的一项）。
 #2 绝对路径 / 用户名：已发布文件里不许出现 `/Users/<名>`、`/home/<名>`。
@@ -23,6 +23,7 @@
 #5 空白 PNG（🔴）：自己解析 IHDR/IDAT + `zlib`，解压后全 0 ⇒ 一个非透明像素都没有。
 #6 图片尺寸≈屏幕（🟡）／ #7 体积 >300KB（🟡）／ #8 许可文件在位（🟡）。
 #9 重写前置条件（🔴）：有 remote 且 `origin/HEAD` 存在 ⇒ 重写要 force-push，所有 clone 全废。
+#10 去人称（🔴）：已发布文件里不许出现内部工作流代号（lead / coder / ops / researcher / writer / 裸 user）。
 
 范围一律是**会被发布的文件**（`git ls-files`）：`docs/evidence/*.desktop.png` 在
 `.gitignore` 里、永远不发布，把它报出来就是假红（文件系统遍历会连 `.DS_Store` 一起捞进来）。
@@ -481,7 +482,7 @@ def check_gate_scripts(root: str, report: Report) -> None:
 
 
 # ————————————————————————————————————————————————————————————————————————————
-# 规格表 #1–#9（见本文件模块 docstring 末尾那张表）。
+# 规格表 #1–#10（见本文件模块 docstring 末尾那张表）。
 #
 # 三条铁律（清单里写死的，别改）：
 #   * 零第三方依赖 —— 纯标准库 + `git` 子进程。CI 没有 GUI、没有 pyobjc、没有 PIL，
@@ -871,6 +872,56 @@ def check_rewrite_precondition(root: str, report: Report) -> None:
         )
 
 
+# —— #10 去人称 ————————————————————————————————————————————————————————————————
+#: 发布文件里不许出现的内部工作流代号。`\b` 必须带：`@users.noreply.github.com` 这种
+#: 邮箱里的 `@users` 不带词边界时**不会**命中「user」这一项 —— 没有 `\b` 就会把邮箱判成代号（假红）。
+HANDLE_RE = re.compile(r"@(?:lead|coder|ops|researcher|writer|user)\b")
+
+#: 命中行里有这些记号 ⇒ 它是在**讲这条去人称规矩**（点名代号当反例），不是正文里真用了代号。
+#: 守卫自己写这条规格、测试自己造样本都得写出这些代号；朴素写法会把它判红 ——
+#: 同判据①③「守卫把守卫判红」那类假红，所以只做**同一条行内**豁免，且要打印（不许静默放过）。
+HANDLE_RULE_MARKERS = (
+    "Never write",
+    "never write",
+    "不出现",
+    "去人称",
+    "内部代号",
+    "internal handles",
+)
+
+
+def check_internal_handles(root: str, report: Report) -> None:
+    """#10（🔴）去人称：已发布文件里不许出现内部工作流代号。"""
+    report.section("判据 #10 去人称：已发布文件里不许出现内部工作流代号")
+    hits = 0
+    exempt = 0
+    scanned = 0
+    for relpath in published_files(root):
+        scanned += 1
+        for lineno, text in published_lines(root, relpath):
+            found = HANDLE_RE.findall(text)
+            if not found:
+                continue
+            if any(word in text for word in RULE_WORDS) or any(
+                marker in text for marker in HANDLE_RULE_MARKERS
+            ):
+                exempt += 1
+                report.ok(
+                    relpath,
+                    lineno,
+                    "讲去人称规则的行，豁免：" + "、".join(sorted(set(found))),
+                )
+                continue
+            hits += 1
+            report.fail(
+                relpath, lineno, "出现内部工作流代号：" + "、".join(sorted(set(found))), text
+            )
+    if not hits:
+        report.ok(
+            "<已发布文件>", 0, f"{scanned} 个文件，无内部工作流代号（{exempt} 行豁免）"
+        )
+
+
 def existing_dir(value: str) -> str:
     if not os.path.isdir(value):
         raise argparse.ArgumentTypeError(f"目录不存在：{value}")
@@ -913,7 +964,7 @@ def main(argv: list[str] | None = None) -> int:
     check_declared_paths(root, report)
     check_gate_scripts(root, report)
     check_docs_reachable(root, report)
-    # 规格表 #1–#9：顺序与清单一致，FAIL/WARN 都带位置与原句。
+    # 规格表 #1–#10：顺序与清单一致，FAIL/WARN 都带位置与原句。
     check_history_identity(root, report)
     check_abs_paths(root, report)
     check_secrets(root, report)
@@ -923,6 +974,7 @@ def main(argv: list[str] | None = None) -> int:
     check_file_sizes(root, report)
     check_license_files(root, report)
     check_rewrite_precondition(root, report)
+    check_internal_handles(root, report)
 
     rc = report.summary()
     if args.json:

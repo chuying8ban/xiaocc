@@ -27,7 +27,7 @@ import sys
 from pathlib import Path
 
 TEMPLATE_SUFFIX = ".in"
-#: 渲染完还剩这种记号 = 模板里有本脚本不认识的占位符（`@lead` 这种小写人名不在内，不会误伤）。
+#: 渲染完还剩这种记号 = 模板里有本脚本不认识的占位符（`@name` 这种小写记号不在内，不会误伤）。
 LEFTOVER_RE = re.compile(r"@[A-Z][A-Z0-9_]*@")
 #: launchd 拒绝组/全局可写的 plist，所以别把权限交给 umask 碰运气。
 PLIST_MODE = 0o644
@@ -100,8 +100,7 @@ def report_diff(label: str, target: Path, data: bytes) -> bool:
 
 def output_name(template: Path) -> str:
     """`ai.hermes.xiaocc.plist.in` → `ai.hermes.xiaocc.plist`。"""
-    name = template.name
-    return name[: -len(TEMPLATE_SUFFIX)] if name.endswith(TEMPLATE_SUFFIX) else name
+    return template.name.removesuffix(TEMPLATE_SUFFIX)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -132,10 +131,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    if args.stdout or args.out:
-        if len(args.templates) != 1:
-            print("render: --stdout / --out 一次只能渲染一个模板", file=sys.stderr)
-            return 2
+    if (args.stdout or args.out) and len(args.templates) != 1:
+        print("render: --stdout / --out 一次只能渲染一个模板", file=sys.stderr)
+        return 2
     values = resolve_values(args)
 
     if args.stdout:

@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 #: 档位枚举与别名**只从 `settings` 引**（面板的 labels、桌宠的点击、CLI 都引同一份）：
-#: 在这里再抄一份就是第三处副本，加档时必漏一处（2026-09-29 @writer 数出来的那面墙）。
+#: 在这里再抄一份就是第三处副本，加档时必漏一处（2026-09-29 数出来的那面墙）。
 #: 别名仍要认 `caption`：旧配置里的值、宽度笔都会拿它来量。
 from ..settings import CLICK_ACTION_ALIASES as _ACTION_ALIASES
 from ..settings import CLICK_ACTIONS as ACTIONS  # noqa: F401 - 转出去给宽度笔/CLI 用
@@ -141,7 +141,7 @@ def _device_parts(device: Any, *, pending: bool = False) -> list[str]:
 
 
 def device_bubble_candidates(device: Any, *, pending: bool = False) -> list[list[str]]:
-    """设备状态那两行（CPU/内存 在上、磁盘/电池 在下），按 @writer 量的每行 148px 排。"""
+    """设备状态那两行（CPU/内存 在上、磁盘/电池 在下），按每行 148px 排。"""
     return _pack_candidates(_device_parts(device, pending=pending))
 
 
@@ -175,7 +175,7 @@ def bubble_candidates(
     quota_cands = badge_bubble_candidates(report, meta)
     if action != "all":
         return quota_cands
-    # 「全部」：额度一行 + 设备一行（@writer 量的那个形态）。额度那行取**紧凑形**（金额 · 时效），
+    # 「全部」：额度一行 + 设备一行（那个形态）。额度那行取**紧凑形**（金额 · 时效），
     # 找不到紧凑形就用它自己的首选整句；设备那行只取**首行**（CPU · 内存）——两行是气泡的硬上限，
     # 把设备那档的整组（可能两行）拼进来就成了三行，超出的部分真机上会被裁掉。
     quota_line = " · ".join(quota_cands[-2] if len(quota_cands) >= 2 else quota_cands[0])
@@ -203,7 +203,7 @@ def badge_bubble_candidates(
     age = meta.get("age_s")
     if meta.get("stale") or (isinstance(age, (int, float)) and age > STALE_AGE_S):
         # 两行的候选都要带「未更新」这个「别信它」的字：只写 `_ago(age)`（"60 分钟前"）会把
-        # 提醒丢掉 —— 那半句话存在的意义就是别让人把陈旧数字当真数（@writer 逐行挑出来的）。
+        # 提醒丢掉 —— 那半句话存在的意义就是别让人把陈旧数字当真数（逐行挑出来的）。
         return [
             ["余额数据陈旧", f"{_ago(age)}未更新"],
             ["余额数据陈旧", "未更新"],
@@ -227,7 +227,7 @@ def badge_bubble_candidates(
             [amount],
         ]
     # **不许**把这句话拆成「没有可自动获取的 / 余额」—— 这段代码存在的理由就是
-    # 「到了两行版式里会变成半句话」，它自己第一个犯（@writer 拿真 quota.json 跑出来的）。
+    # 「到了两行版式里会变成半句话」，它自己第一个犯（拿真 quota.json 跑出来的）。
     # 第一行给结论、第二行给动作；最后那条是保底（160px 下短句还能整句读出来）。
     return [
         ["没有可自动获取的余额", "去官网看余额"],

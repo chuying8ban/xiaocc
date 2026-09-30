@@ -165,7 +165,7 @@ def bubble_text_width_for(window_width: float) -> float:
     """气泡里每行文字可用宽度 —— **唯一一处算法**。
 
     运行时挑候选（``AppKitBackend._bubble_text_width``）与宽度笔
-    （``scripts/measure_bubble_widths.py``）都调它。两处各写一个数就会漂：2026-09-29 @writer
+    （``scripts/measure_bubble_widths.py``）都调它。两处各写一个数就会漂：2026-09-29
     抓到笔自己写 148（照「窗口 160 − 左右各 6」），而画字还有左右各 8px 内缩 ⇒ 真机每行只有
     **132px**，笔会把 133~148px 的候选判成「放得下」，真机上却选不上、或选中后被截成半句话
     （`Credits1200.00 · 9 分钟前` 134.5px 就是那条）。一处数字、多处引用，才配当判据。
@@ -451,7 +451,7 @@ class AppKitBackend(Backend):
         self._badge_drawn = ""
         self._badge_dirty = False
         #: 真画下去多少帧（每秒结算）—— 用来把「5% 还是 1.9%」那两档钉死：5% 那几拍若是
-        #: 15 帧/秒、安静态是 0~3，差别就全在指纹闸上；两边一样就得往别处查（@researcher 的建议）。
+        #: 15 帧/秒、安静态是 0~3，差别就全在指纹闸上；两边一样就得往别处查。
         self._paints = 0
         self._paints_window_start = self._started
         self._paints_per_sec = 0.0
@@ -764,7 +764,7 @@ class AppKitBackend(Backend):
             #: 气泡当前不透明度（淡化中会从 1.0 掉到 0.0）—— 判据要看「淡化中指纹逐帧变」，
             #: 这个数就是那件事的可读证据
             "badge_alpha": round(self._badge_alpha(), 2),
-            #: 真正画下去多少帧/秒（@researcher 那个零成本判定实验：一个数就能把两档 CPU 钉死）
+            #: 真正画下去多少帧/秒（零成本判定实验：一个数就能把两档 CPU 钉死）
             "paints_per_sec": self._paints_per_sec,
             #: 单击小cc 时按设置做什么（badge / device / all / none）—— 取自 settings.json
             "click_action": self._click_action(),
@@ -1247,7 +1247,7 @@ class AppKitBackend(Backend):
     def _mouse_up(self, event: Any = None) -> None:
         """松手：先判这次是不是「点击」，再决定要不要按拖拽收尾。
 
-        三种手势的语义（2026-09-29 定，@researcher 的时序论证 + @ops 的三条风险都采纳）：
+        三种手势的语义（2026-09-29 定，时序论证 + 三条风险都采纳）：
 
         * **单击** = 按设置显示（默认额度条）—— **立刻响应，不为了等双击而延迟**：
           用户刚抱怨过卡，再叠半秒很亏。
@@ -1256,7 +1256,7 @@ class AppKitBackend(Backend):
         * **按住 > ``_TAP_MAX_HOLD_S``** = 不算点击（拖动仍然是拖动）。
 
         判定输入（位移/按住多久/是否双击）一律进日志 —— 这条路径以前只有「结果」，
-        @ops 用合成事件测不进部署实例的按键，只能靠日志反推真实点击分布。
+        用合成事件测不进部署实例的按键，只能靠日志反推真实点击分布。
         """
         if not self._dragging:
             return
@@ -1344,7 +1344,7 @@ class AppKitBackend(Backend):
             device = self._device.get(wait=not pending)
         self._bubble_action = action
         self._show_badge(lines=self._bubble_lines(action, device, device_pending=pending))
-        # 真机上几乎够不到（启动→首次交互最短 6s，@ops 全天 10 次样本），但**回归脚本会在重启后
+        # 真机上几乎够不到（启动→首次交互最短 6s，全天 10 次样本），但**回归脚本会在重启后
         # 1 秒内就点**（同一个采样窗口）——所以这一路的字面也得对：排一次补数。
         self._bubble_refill_at = (
             time.monotonic() + self._device.wait_remaining() + 0.15 if pending else None
@@ -1462,9 +1462,9 @@ class AppKitBackend(Backend):
         的「显示额度」—— 单击就能看到；设置也并进面板了，所以「设置…」那条也没了）。
 
         **必须早退**：右键不进 :meth:`_mouse_down` 那条 tap/drag 判定，否则右键会顺手把桌宠
-        拖走或触发贴边收展（@ops 点出来的那条）。菜单里不做「重启/退出」—— 那个要跟 launchd
+        拖走或触发贴边收展（那条）。菜单里不做「重启/退出」—— 那个要跟 launchd
         的 KeepAlive 策略一起定（现在配的是「只在非正常退出时拉起」），没定清楚之前不摆进去
-        （@ops：`KeepAlive{SuccessfulExit:false}` 下「退出」是干净退出 0 ⇒ launchd 不会拉回来，
+        （`KeepAlive{SuccessfulExit:false}` 下「退出」是干净退出 0 ⇒ launchd 不会拉回来，
         用户以为退出、其实永久关掉；「重启」得走返回式收尾 + `execv`，`NSApp.terminate_` 不返回）。
         """
         menu = self._build_menu()

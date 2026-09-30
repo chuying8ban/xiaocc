@@ -34,7 +34,7 @@ from xiaocc.quota import load
 from xiaocc.quota.badge import ACTIONS, bubble_candidates
 
 #: 气泡每行可用宽 —— **从应用自己的算法算**（窗口宽按角色推），别在笔里另写一个数：
-#: 2026-09-29 @writer 抓到笔写 148、而应用画字还有 8px 内缩 ⇒ 真机只有 132，笔会把 133~148px
+#: 2026-09-29 抓到笔写 148、而应用画字还有 8px 内缩 ⇒ 真机只有 132，笔会把 133~148px
 #: 的候选判成「放得下」。改内边距/内缩时两边**必然**一起动。
 LINE_MAX_PT = bubble_budget_for(load_character())
 FONT_SIZE = 11.0

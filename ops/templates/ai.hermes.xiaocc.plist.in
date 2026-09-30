@@ -10,7 +10,7 @@
 		<string>/bin/zsh</string>
 		<string>@REPO_ROOT@/ops/run-panel.sh</string>
 		<string>top-right</string>
-		<!-- 帧率：待机 12~15 是 @lead 批准的设计参数。30 帧在部署路径 9.0%、15 帧 4.9%，
+		<!-- 帧率：待机 12~15 是批准的设计参数。30 帧在部署路径 9.0%、15 帧 4.9%，
 		     圈速 15.0/s 与配置自洽（不是被节流），外部像素判据照过。真正把空闲压到近 0
 		     要走「合成器隐式动画」那一轮，不是靠继续降帧。 -->
 		<string>15</string>

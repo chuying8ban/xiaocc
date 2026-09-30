@@ -116,7 +116,7 @@ def _summary(models: list[dict[str, Any]], **extra: Any) -> dict[str, Any]:
 
     `models`（按模型明细）留在 :func:`scan_db` 里做内部聚合用，**不进 payload**：
     面板和 CLI 都不读它，写进 `quota.json` 就只是没人用的死数据（用户 2026-09-29 的
-    「不要有功能不明的功能」，@lead 拍板删）。谁要按模型看，`ledger.scan_db()` 直接给。
+    「不要有功能不明的功能」，拍板删）。谁要按模型看，`ledger.scan_db()` 直接给。
     """
     return {
         "calls": sum(m["calls"] for m in models),

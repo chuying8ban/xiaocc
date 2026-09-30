@@ -217,7 +217,7 @@ def test_cpu_window_is_wide_enough_that_frozen_pairs_vanish() -> None:
     """窗口必须 ≥1s —— 这条守的是一个**量出来的常数**，不是审美。
 
     2026-09-29 本机 30s @0.1s 直采 287 点：窗口 0.5s 时两读数"一模一样"（delta=0）**13.8%**、
-    窗口 1.0s 时 **0.0%**（@researcher 独立采样：10.1% vs 0/562）。降回 0.5s 就等于把
+    窗口 1.0s 时 **0.0%**（独立采样：10.1% vs 0/562）。降回 0.5s 就等于把
     「冷启动约 1/7 概率显示 CPU 未取到」这个 flake 放回来。
     """
     from xiaocc import device as device_mod

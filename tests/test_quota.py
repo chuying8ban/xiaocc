@@ -429,7 +429,7 @@ def test_qwen_missing_binary_and_other_failures(tmp_path: Path):
 
 
 def test_qwen_credits_from_seat_tiers_addon_and_period(tmp_path: Path):
-    """@researcher 从二进制里反解的四处兜底：顶层 / seatTiers / addonRemaining / period。"""
+    """从二进制里反解的四处兜底：顶层 / seatTiers / addonRemaining / period。"""
     payload = {
         "data": {
             "planName": "Token Plan",
@@ -710,7 +710,7 @@ def test_all_action_survives_missing_device():
 
 
 def test_snapshot_payload_has_no_dead_keys(tmp_path: Path):
-    """交付面上只放**有人读**的字段：按模型明细不进 payload（@lead 拍板删）。
+    """交付面上只放**有人读**的字段：按模型明细不进 payload（拍板删）。
 
     用户 2026-09-29 的要求是「不要有功能不明的功能」——面板和 CLI 都不读 `models`，
     写进 quota.json 就只是没人用的死数据。要看明细用 `ledger.scan_db()`（内部仍给）。

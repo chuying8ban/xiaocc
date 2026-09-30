@@ -1,6 +1,6 @@
 # 面板 CPU 15% vs 4%：真凶是 plist 里的 `ProcessType=Interactive`
 
-核查：@researcher，2026-09-29，1512×982 屏，`--source hermes`，`fps=30`，全部从进程外
+核查：2026-09-29，1512×982 屏，`--source hermes`，`fps=30`，全部从进程外
 用 `ps -o time=` 做差量（暖机后取窗口，单位 = 累计 CPU 秒 / 窗口秒）。
 
 ## 结论（实测）
@@ -10,12 +10,12 @@
 | 前台手工：`xiaocc run -b appkit`（默认右上角） | **3.6%** |
 | 前台手工：`--backend-opt at=bottom-right`（= run-panel.sh 那一路） | **4.1%** |
 | 前台 + 项目目录 cwd + 最小 PATH + stdout 重定向到日志文件 | **4.2%** |
-| **launchd（LaunchAgent）+ `ProcessType=Interactive`** | **16.4%**（本人两轮：45s 窗口、20s 窗口各一次；@ops 独立测得 15.2 / 15.3%） |
+| **launchd（LaunchAgent）+ `ProcessType=Interactive`** | **16.4%**（本人两轮：45s 窗口、20s 窗口各一次；独立测得 15.2 / 15.3%） |
 | **launchd 不带 `ProcessType` 键** | **4.6% / 4.5%**（本人两轮，45s / 20s 窗口） |
 
 `Interactive / 无键 = 3.57x ~ 3.64x`，两次独立复跑一致（`scripts/verify_process_type.py`）。
 
-即：**@coder 的忙等修复是对的，@ops 的 15% 也是真的 —— 差异来自部署 plist 的一个键，不是代码。**
+即：**忙等修复是对的，15% 也是真的 —— 差异来自部署 plist 的一个键，不是代码。**
 去掉那个键，同一份代码在 launchd 下就是 4.5%，与小汐同规格基准（4.6~5.0%）同档。
 
 ## 被排除的变量（逐个实测，不是推断）
@@ -35,7 +35,7 @@
 至于这 3.5 倍是「唤醒本身变贵」还是「合成/绘制被全额计费」，本次没做栈采样；
 要坐实机制，对部署中的进程跑一次 `sample <pid> 5` 看栈直方图即可（不需要 sudo）。
 
-## 建议（@ops 的 plist 一行，@coder 的代码一行）
+## 建议（plist 一行，代码一行）
 
 1. `ProcessType=Interactive` → 先试 **`Adaptive`**（Apple 文档语义：由系统决定，前台全速、
    不在前台可被节流），实测不达标就**整个删掉这个键**（已实测 4.5%）。
@@ -43,11 +43,11 @@
 
    **⚠️ 本节后经全队复核被推翻（2026-09-29 晚），保留原文仅为留痕：**
    - `Adaptive` 白换（16.6% vs 16.8%）；**删键那一路的 4.5~4.6% 是「被节流」而不是「省电」**——
-     @coder 复量到圈速 10.3/s（屏睡时 5.9/s），只有配置值的 0.2~0.34 倍，画面真卡了。
-   - 所以 plist **保留 `Interactive`**（@ops 定，四臂数字已写进 plist 注释）；
-     降 CPU 只能靠每帧少画：@coder 的静态层点阵化把部署路径从 16.8% 压到 9.0%（圈速不变），
+     复量到圈速 10.3/s（屏睡时 5.9/s），只有配置值的 0.2~0.34 倍，画面真卡了。
+   - 所以 plist **保留 `Interactive`**（四臂数字已写进 plist 注释）；
+     降 CPU 只能靠每帧少画：静态层点阵化把部署路径从 16.8% 压到 9.0%（圈速不变），
      再以 `fps=15` 过闸（3.8%，圈速 13.9/s = 配置值）。
-   - 另：本文「屏幕睡着时数字会偏低」说反了一半——@ops 实测 `Interactive` 那臂屏睡时仍 14.6%
+   - 另：本文「屏幕睡着时数字会偏低」说反了一半——实测 `Interactive` 那臂屏睡时仍 14.6%
      （照画不误），低的是被节流的那一臂。**两臂仍要记录显示状态，但别拿它解释差异。**
 2. **验收要同时量两件事**，否则「便宜」可能只是「被节流了」：CPU < 5% **且** 事件循环圈速
    ≈ `fps`。`appkit.probe()` 里已经有这两个自证据（上一秒结算的圈速、上一圈真正睡了多少 ms），
@@ -67,4 +67,4 @@ python scripts/verify_process_type.py --seconds 20 --warmup 10
 
 脚本用一次性 Label `ai.hermes.xiaocc.proctypeprobe-*`，跑完 `bootout` + 删 plist，
 不碰部署中的 `ai.hermes.xiaocc`；锚点走 `XIAOCC_ANCHOR_FILE` 临时路径，
-不污染 `~/.xiaocc/anchor.json`（@coder 踩过的那个坑）。
+不污染 `~/.xiaocc/anchor.json`（踩过的那个坑）。

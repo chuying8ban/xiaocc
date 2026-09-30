@@ -5,7 +5,7 @@
 	<key>Label</key>
 	<string>ai.hermes.xiaocc.reverify</string>
 
-	<!-- 一次性任务（@lead 定）：只在本 job 被 bootstrap 时跑一次 —— 没有 StartInterval、没有 KeepAlive，
+	<!-- 一次性任务：只在本 job 被 bootstrap 时跑一次 —— 没有 StartInterval、没有 KeepAlive，
 	     跑完 launchd 保持「已加载但不在运行」，不会被周期拉起，因此不会和看门狗叠噪音。
 	     要再补验（例如屏幕又睡了没验成），重新 bootstrap 一次即可：
 	       launchctl bootout  gui/$(id -u)/ai.hermes.xiaocc.reverify

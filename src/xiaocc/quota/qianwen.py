@@ -124,7 +124,7 @@ def _find_plan(node: Any, depth: int = 2) -> dict[str, Any] | None:
 def _credits_items(payload: Any) -> list[QuotaItem]:
     """``subscription status --plan token`` 的 Credits。
 
-    **坑（@researcher 先踩、我从 CLI 二进制独立核过）**：``subscription`` 是命令组不是叶子，
+    **坑（先踩、我从 CLI 二进制独立核过）**：``subscription`` 是命令组不是叶子，
     光敲 ``subscription --format json`` 会**打印帮助并 exit 0**——拿到的不是数据。叶子是
     ``subscription status --plan token``。
 
