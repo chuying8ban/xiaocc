@@ -4,8 +4,8 @@
 它**不回答「门禁是不是绿的」**——运行时是否通过由本机日志回答，日志不进仓库，
 否则把某一次运行结果写进版本库，又是一次「承诺超出事实」。
 
-前四条判据查「文档声明 ↔ 仓库事实」，后面十条是本文件模块 docstring 里那张规格表
-#1–#10 的逐条落地（规格与实现同文件，避免指向仓库外的文档）。全部只读仓库、不跑被测程序：
+前四条判据查「文档声明 ↔ 仓库事实」，后面十一条是本文件模块 docstring 里那张规格表
+#1–#11 的逐条落地（规格与实现同文件，避免指向仓库外的文档）。全部只读仓库、不跑被测程序：
 
 ① 措辞：仓库根 `docs/` 下递归所有 `.md` 与仓库根 `ASSET_LICENSE.md` 里，
    来源声明不许出现 BAD_WORDS（自绘 / 纯手绘 / 手工绘制）。
@@ -14,7 +14,7 @@
 ③ 护栏：文档里逐字点名的 13 支门禁脚本，必须还在 `scripts/` 下（防未来改名 / 删除）。
 ④ 可达性：`docs/` 下每个文件都得能从 `README.md` / `README_EN.md` 顺着链接走到。
 
-规格表 #1–#10（红线 #1/#2/#3/#5/#9/#10 判 🔴，其余 🟡 只提醒、不影响退出码）：
+规格表 #1–#11（红线 #1/#2/#3/#5/#9/#10/#11 判 🔴，其余 🟡 只提醒、不影响退出码）：
 
 #1 历史身份：提交历史里不许出现本机用户名 / 主机名兜底邮箱（唯一「发出去就难改」的一项）。
 #2 绝对路径 / 用户名：已发布文件里不许出现 `/Users/<名>`、`/home/<名>`。
@@ -24,6 +24,7 @@
 #6 图片尺寸≈屏幕（🟡）／ #7 体积 >300KB（🟡）／ #8 许可文件在位（🟡）。
 #9 重写前置条件（🔴）：有 remote 且 `origin/HEAD` 存在 ⇒ 重写要 force-push，所有 clone 全废。
 #10 去人称（🔴）：已发布文件里不许出现内部工作流代号（lead / coder / ops / researcher / writer / 裸 user）。
+#11 点名提交可解析（🔴 .md / 🟡 scripts/*.py）：已发布文件里逐字点名的提交，必须能在本仓解析。
 
 范围一律是**会被发布的文件**（`git ls-files`）：`docs/evidence/*.desktop.png` 在
 `.gitignore` 里、永远不发布，把它报出来就是假红（文件系统遍历会连 `.DS_Store` 一起捞进来）。
@@ -482,7 +483,7 @@ def check_gate_scripts(root: str, report: Report) -> None:
 
 
 # ————————————————————————————————————————————————————————————————————————————
-# 规格表 #1–#10（见本文件模块 docstring 末尾那张表）。
+# 规格表 #1–#11（见本文件模块 docstring 末尾那张表）。
 #
 # 三条铁律（清单里写死的，别改）：
 #   * 零第三方依赖 —— 纯标准库 + `git` 子进程。CI 没有 GUI、没有 pyobjc、没有 PIL，
@@ -922,6 +923,91 @@ def check_internal_handles(root: str, report: Report) -> None:
         )
 
 
+# —— #11 点名提交可解析 ——————————————————————————————————————————————————————————
+#: 候选 token：7 位或 40 位小写十六进制，前后不许再贴着十六进制字符。
+#: 前后夹断是必需的：不然 40 位 SHA 里会再切出中间 7 位、64 位 sha256 里也会切出
+#: 一段 40 位当作独立 token，都是同一句里的重复假红。
+COMMIT_REF_RE = re.compile(r"(?<![0-9a-f])([0-9a-f]{7}|[0-9a-f]{40})(?![0-9a-f])")
+
+#: 怎么才算「点名了一个提交」：token 被反引号包住，或该行出现下面这些「讲提交」的词。
+#: 为什么必须有这个语境判据：`1000000`、`1790702` 这种纯数字不是 SHA，
+#: 而英文单词（如 defaced）、sha256 文件摘要也长得像十六进制——不卡语境就会把它们
+#: 误判成「点名的提交」，全是假红。所以先按语境收口，再送去 git cat-file 验证。
+REF_CONTEXT_WORDS = (
+    "已修",
+    "已并进",
+    "之后",
+    "那次",
+    "那版",
+    "参照",
+    "取代",
+    "提交",
+    "commit",
+    "rev",
+    "见",
+)
+
+
+def in_commit_ref_context(line: str, token: str) -> bool:
+    """这个 token 是否落在「点名一个提交」的语境里（反引号包裹，或同行有语境词）。"""
+    for span in BACKTICK_RE.findall(line):
+        if token in span:
+            return True
+    return any(word in line for word in REF_CONTEXT_WORDS)
+
+
+def check_doc_commit_refs(root: str, report: Report) -> None:
+    """#11（🔴 .md / 🟡 scripts/*.py）已发布文件里逐字点名的提交，必须能在本仓解析。
+
+    只扫 `.md` 与 `.py`；`tests/` 下的 `.py` 直接跳过：测试故意现造死 SHA 当样本，
+    扫它就是「守卫把守卫自己的测试判红」那类假红（同判据①、#10 已有的豁免口径）。
+    同一个 token 的 `git cat-file -t` 结果缓存复用，仓库里点同一提交多处的只查一次。
+    """
+    report.section("判据 #11 点名提交可解析：已发布 .md / .py 里点名的提交必须在仓库里可解析")
+    resolved_types: dict[str, tuple[int, str]] = {}
+    hits = 0
+    problems = 0
+    for relpath in published_files(root):
+        if not relpath.endswith((".md", ".py")):
+            continue
+        if relpath.startswith("tests/") and relpath.endswith(".py"):
+            continue
+        for lineno, text in published_lines(root, relpath):
+            for match in COMMIT_REF_RE.finditer(text):
+                token = match.group(1)
+                if not any(ch in "abcdef" for ch in token):
+                    continue  # 纯数字 7 位串不是提交号（1000000、1790702 这类）
+                if not in_commit_ref_context(text, token):
+                    continue  # 英文单词 / 文件摘要不落在点名提交的语境里，不算
+                hits += 1
+                if token not in resolved_types:
+                    resolved_types[token] = git_capture(root, "cat-file", "-t", token)
+                rc, out = resolved_types[token]
+                if rc == 127:
+                    report.warn("<git cat-file>", 0, "git 不可用，点名的提交无法解析")
+                    return
+                if rc != 0:
+                    message = f"点名了不存在的提交 {token}：git cat-file -t 取不到"
+                    if relpath.endswith(".md"):
+                        report.fail(relpath, lineno, message, text)
+                    else:
+                        report.warn(relpath, lineno, message, text)
+                    problems += 1
+                    continue
+                object_type = out.strip()
+                if object_type == "commit":
+                    continue
+                report.warn(
+                    relpath,
+                    lineno,
+                    f"点名的 {token} 不是提交对象：git cat-file -t 返回 {object_type}",
+                    text,
+                )
+                problems += 1
+    if not problems:
+        report.ok("<已发布文件>", 0, f"{hits} 处提交引用全部可解析")
+
+
 def existing_dir(value: str) -> str:
     if not os.path.isdir(value):
         raise argparse.ArgumentTypeError(f"目录不存在：{value}")
@@ -964,7 +1050,7 @@ def main(argv: list[str] | None = None) -> int:
     check_declared_paths(root, report)
     check_gate_scripts(root, report)
     check_docs_reachable(root, report)
-    # 规格表 #1–#10：顺序与清单一致，FAIL/WARN 都带位置与原句。
+    # 规格表 #1–#11：顺序与清单一致，FAIL/WARN 都带位置与原句。
     check_history_identity(root, report)
     check_abs_paths(root, report)
     check_secrets(root, report)
@@ -975,6 +1061,7 @@ def main(argv: list[str] | None = None) -> int:
     check_license_files(root, report)
     check_rewrite_precondition(root, report)
     check_internal_handles(root, report)
+    check_doc_commit_refs(root, report)
 
     rc = report.summary()
     if args.json:

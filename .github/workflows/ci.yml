@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: 安装
+        run: python -m pip install -e ".[dev]"
+      - name: 核心测试（不依赖图形库）
+        run: python -m pytest -q
+      # 这里不再跑 `xiaocc run --source hermes --backend console --once`：
+      # 那条要真额度 / 真网络，三个 runner 上会偶红 —— 一条会随机变红的门禁，
+      # 结果就是没人再看它。可复现的 CLI 面（版本、源清单、角色包校验）留在上面三行。
+      - name: CLI 冒烟
+        run: |
+          xiaocc --version
+          xiaocc sources
+          xiaocc character validate
+
+  # 单独一个 job：发布前检查只读仓库、零第三方依赖，与平台/版本无关，
+  # 没必要在 6 个矩阵格子里各跑一遍（同下面 lint job 的理由）。
+  # 这条正是「CI 只看元数据、不看像素」那次空图事故的补丁：release_check 的判据 #5
+  # 自己解析 IHDR/IDAT，空图、点不到的死提交、漏出去的本机身份都在 push / PR 阶段就红，
+  # 而不是等发版时人工扫一遍。
+  # `fetch-depth: 0` 是必需的：判据 #1 要读**全部**提交历史，默认的浅克隆只剩一个提交，
+  # 那条判据就形同虚设（绿得毫无信息量）。
+  release-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: 发布前检查（文档声明 ↔ 仓库事实）
+        run: python3 scripts/release_check.py
+
+  # 单独一个 job：lint 与平台/版本无关，没必要在 6 个矩阵格子里各跑一遍。
+  # 不加 --fix、不加 `|| true` —— 门禁就该让不干净的代码红，而不是悄悄修好再放行。
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: 安装
+        run: python -m pip install -e ".[dev]"
+      - name: 代码检查（ruff）
+        run: python -m ruff check src tests scripts

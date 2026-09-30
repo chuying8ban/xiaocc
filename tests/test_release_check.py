@@ -1,4 +1,4 @@
-"""`scripts/release_check.py` 规格表 #1–#10 的反向控制（每条都得能被现造样本判红）。
+"""`scripts/release_check.py` 规格表 #1–#11 的反向控制（每条都得能被现造样本判红）。
 
 本仓规矩是「不许只写不验」：一条判据如果没人证明过它会红，那它绿不绿就没有信息量。
 这里在 `tmp_path` 里**现搭一个最小 git 仓库**（造样本 → 跑 → 看 rc / 看那一行 → 目录自己清掉），
@@ -28,7 +28,7 @@ import release_check
 CLEAN_EMAIL = "t@example.com"
 CLEAN_NAME = "T"
 
-#: 一个「除了被测那一项之外全绿」的最小仓库。判据 #1–#10 之外还要过 ①–④：
+#: 一个「除了被测那一项之外全绿」的最小仓库。判据 #1–#11 之外还要过 ①–④：
 #: 所以得有文档目录（① 需要）、入口 md（④ 需要）、13 支门禁脚本（③ 需要）。
 BASE_FILES: dict[str, str | bytes] = {
     "README.md": "# t\n",
@@ -499,3 +499,77 @@ def test_handle_scan_covers_src_not_just_docs(
     rc, out = run_check(root, capsys)
     assert rc == 1
     assert f"FAIL src/xiaocc/quota/badge.py:1  出现内部工作流代号：{_CODER}" in out
+
+
+# ——————————————————————————————————————————————————————————————————————————————
+# #11 点名提交可解析（🔴 .md / 🟡 scripts/*.py）
+# ——————————————————————————————————————————————————————————————————————————————
+
+
+def test_dead_commit_ref_in_docs_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """docs/ 下 `.md` 点名一个不存在的 7 位 SHA ⇒ 🔴，FAIL 并带出原句。"""
+    files = dict(BASE_FILES)
+    files["README.md"] = "# t\n\n[设计记录](docs/design/README.md)\n"
+    files["docs/design/README.md"] = "# 设计\n\n旧版在 `0badc0d` 那次之后退役\n"
+    root = make_repo(tmp_path, files)
+    rc, out = run_check(root, capsys)
+    assert rc == 1
+    assert "FAIL docs/design/README.md:3  点名了不存在的提交 0badc0d：git cat-file -t 取不到" in out
+
+
+def test_real_commit_ref_in_docs_is_green(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """现造一个真实提交，docs/ 下 `.md` 用它带语境词的短 SHA ⇒ rc == 0。"""
+    files = dict(BASE_FILES)
+    files["README.md"] = "# t\n\n[设计记录](docs/design/README.md)\n"
+    files["docs/design/README.md"] = "# 设计\n"
+    root = make_repo(tmp_path, files)
+    # 短 SHA 前 7 位有可能全是数字（判据 #11 把纯数字串当非提交号跳过），
+    # 那就再补一个提交，直到拿到一个含 a–f 字母、能被判据当提交号收下的短 SHA。
+    short = ""
+    for _ in range(8):
+        git(root, "commit", "-q", "--allow-empty", "-m", "real commit")
+        candidate = git(root, "rev-parse", "--short=7", "HEAD").strip()
+        if any(ch in "abcdef" for ch in candidate):
+            short = candidate
+            break
+    assert short, "造不出含字母的短 SHA（概率上几乎不可能）"
+    (root / "docs/design/README.md").write_text(
+        f"# 设计\n\n重拍参照 `{short}` 那版。\n", encoding="utf-8"
+    )
+    git(root, "add", "-A")
+    git(root, "commit", "-q", "-m", "point at real commit")
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+
+
+def test_non_commit_hex_is_not_reported(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """假 token 不许被报：纯数字 `1000000` 与 64 位 sha256 都要静默放行。"""
+    files = dict(BASE_FILES)
+    files["README.md"] = "# t\n\n[设计记录](docs/design/README.md)\n"
+    sha256 = "e" * 64
+    files["docs/design/README.md"] = (
+        f"# 设计\n\n纯数字 `1000000` 与 sha256 `{sha256}` 都不算提交号。\n"
+    )
+    root = make_repo(tmp_path, files)
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert "1000000" not in out
+    assert sha256 not in out
+
+
+def test_dead_commit_ref_in_scripts_is_warn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """scripts/ 下 `.py` 的注释里点一个不存在的 7 位 SHA ⇒ 只 🟡、不影响退出码。"""
+    files = dict(BASE_FILES)
+    files["scripts/appkit_screenshots.py"] = "# 参照 0badc0d 那版\n"
+    root = make_repo(tmp_path, files)
+    rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert "WARN scripts/appkit_screenshots.py:1  点名了不存在的提交 0badc0d：git cat-file -t 取不到" in out
