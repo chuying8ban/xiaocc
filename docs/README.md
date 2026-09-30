@@ -11,9 +11,8 @@
 | [design/README.md](design/README.md) | 形象与界面稿、实拍，以及每张图对应哪一版 |
 | [evidence/README.md](evidence/README.md) | 真窗口抓的取证截图，各张证明什么；[cpu-process-type.md](evidence/cpu-process-type.md) 是其中一个具体疑案的核查 |
 | [PRIOR-ART.md](PRIOR-ART.md) | 与先例、同类项目的边界核查（哪些判断是我们自己的） |
-| [RELEASE-CHECKLIST.md](RELEASE-CHECKLIST.md) | 发布前检查清单：哪些项已由 `scripts/release_check.py` 自动跑、哪些还没落 |
 
-两条规矩：
+三条规矩：
 
 1. **面板上只写「结论 + 一个动作」，依据论证放这里。** 例：某家额度为什么取不到，面板上写
    「无自动接口」，完整依据（探测过的路径、实测结果）在 [quota.md](quota.md) —— 那几行的宽度
@@ -21,3 +20,4 @@
 2. **图片进了 `docs/` 就至少要被引用一次。** 没人引用的图会变成孤儿（读者找不到、作者也不记得
    它对应哪一版）；设计归档用 [design/README.md](design/README.md) 里那张「文件 ↔ 版本 ↔ 状态」
    表挂住，新增图直接往表里加一行。
+3. **不许内部代号出现在读者看得到的地方。** 文档、代码注释、提交信息、发布件里一律不写 `@lead` / `@coder` / `@ops` / `@researcher` / `@writer` / `@user`，要署名就写维护者 `ChenC`，或者干脆不署名。

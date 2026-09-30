@@ -527,7 +527,7 @@ def published_lines(root: str, relpath: str):
 
 
 # —— #1 历史身份 ——————————————————————————————————————————————————————————————
-#: git 在 `user.email` 为空时用 `<用户名>@<主机名>.local` 兜底（本机 = MacBook-Pro.local）。
+#: git 在 `user.email` 为空时用 `<用户名>@<主机名>.local` 兜底（例如 `dev@buildbox.local`）。
 HOST_EMAIL_RE = re.compile(r"@[A-Za-z0-9._-]+\.local", re.IGNORECASE)
 #: 5 位以上纯数字的邮箱名：工号 / 学号 / 手机号 + 兜底域名，同样把本机身份带出去。
 DIGITS_AT_RE = re.compile(r"\d{5,}@")
@@ -846,28 +846,28 @@ def check_license_files(root: str, report: Report) -> None:
 
 # —— #9 重写前置条件 ————————————————————————————————————————————————————————————
 def check_rewrite_precondition(root: str, report: Report) -> None:
-    """#9（🔴）历史重写的前置条件：push 之前重写零成本，push 之后要 force-push。"""
-    report.section("判据 #9 重写前置条件：没有 remote ⇒ 历史重写仍是零成本")
+    """#9（🔴）历史重写的前置条件：先确认远端有没有历史——有历史再重写就得 force-push。"""
+    report.section("判据 #9 重写前置条件：远端有没有历史")
     rc, out = git_capture(root, "remote", "-v")
     if rc == 127:
         report.warn("<git remote>", 0, "git 不可用，判断不了有没有 push 过")
         return
     if not out.strip():
-        report.ok("<git remote>", 0, "没有 remote：从未 push，历史重写仍是零成本")
+        report.ok("<git remote>", 0, "本地没有 remote：但别默认远端没有历史，重写前先核对目标仓是否已存在")
         return
     rc_head, _ = git_capture(root, "rev-parse", "--verify", "origin/HEAD")
     if rc_head == 0:
         report.fail(
             "<git remote>",
             0,
-            "有 remote 且 origin/HEAD 存在：历史重写要 force-push，所有 clone 全废",
+            "远端已有历史（origin/HEAD 在）：再重写要 force-push，先确认没人克隆过",
             out.strip(),
         )
     else:
         report.warn(
             "<git remote>",
             0,
-            "有 remote 但取不到 origin/HEAD：证不了「没 push 过」，重写前先确认",
+            "有 remote 但取不到 origin/HEAD：证不了远端有没有历史，重写前用 `git ls-remote` 确认",
             out.strip(),
         )
 

@@ -146,7 +146,7 @@ def test_json_output_is_machine_readable(
 
 def test_history_identity_is_red(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     """样本 = 一次以 `<用户>@<主机名>.local` 为作者/提交者的提交。"""
-    leaking = "a29285@MacBook-Pro.local"
+    leaking = "dev@buildbox.local"
     root = make_repo(
         tmp_path,
         dict(BASE_FILES),
@@ -427,13 +427,13 @@ def test_remote_without_origin_head_is_warn(
     rc, out = run_check(root, capsys)
     assert rc == 0, out
     assert "WARN <git remote>:0" in out
-    assert "先确认" in out
+    assert "git ls-remote" in out   # 让作者去远端核对有没有历史，别再默认「本地没 remote 就等于远端是空的」
 
 
 def test_remote_with_origin_head_is_red(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """推送过 + 有 origin/HEAD ⇒ 改历史要 force-push，所有 clone 全废。"""
+    """推送过 + 有 origin/HEAD ⇒ 远端已有历史，再重写要 force-push，所有 clone 全废。"""
     bare = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
     root = make_repo(tmp_path, dict(BASE_FILES), remote=str(bare))
@@ -441,7 +441,7 @@ def test_remote_with_origin_head_is_red(
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     rc, out = run_check(root, capsys)
     assert rc == 1
-    assert "FAIL <git remote>:0  有 remote 且 origin/HEAD 存在" in out
+    assert "FAIL <git remote>:0  远端已有历史（origin/HEAD 在）" in out
     assert "force-push" in out
 
 
