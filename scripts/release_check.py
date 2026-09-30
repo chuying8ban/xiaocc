@@ -22,7 +22,9 @@
 #4 未跟踪的敏感文件（🟡）：未跟踪又没被 ignore 的 `.desktop.png` / `.db` / `.log` / `anchor.json`。
 #5 空白 PNG（🔴）：自己解析 IHDR/IDAT + `zlib`，解压后全 0 ⇒ 一个非透明像素都没有。
 #6 图片尺寸≈屏幕（🟡）／ #7 体积 >300KB（🟡）／ #8 许可文件在位（🟡）。
-#9 重写前置条件（🔴）：有 remote 且 `origin/HEAD` 存在 ⇒ 重写要 force-push，所有 clone 全废。
+#9 重写前置条件（🔴/🟡）：有 remote 且 `origin/HEAD` 存在时，看**本地 HEAD 还是不是它的后代** ——
+#   不是（历史已与远端分叉）⇒ 🔴 推上去必须 force-push；是（快进推送）⇒ 🟡，只留一句说明。
+#   判的是**事实**：只按「origin/HEAD 在」判红，任何 fetch 过的正常仓库都会永红（恒红的门禁=没有门禁）。
 #10 去人称（🔴）：已发布文件里不许出现内部工作流代号（lead / coder / ops / researcher / writer / 裸 user）。
 #11 点名提交可解析（🔴 .md / 🟡 scripts/*.py）：已发布文件里逐字点名的提交必须能在本仓解析；
 #   退役表「取回用的提交」那一格还必须在那个提交里真的取得到那张图，且是**最后动过它**的提交。
@@ -848,8 +850,14 @@ def check_license_files(root: str, report: Report) -> None:
 
 # —— #9 重写前置条件 ————————————————————————————————————————————————————————————
 def check_rewrite_precondition(root: str, report: Report) -> None:
-    """#9（🔴）历史重写的前置条件：先确认远端有没有历史——有历史再重写就得 force-push。"""
-    report.section("判据 #9 重写前置条件：远端有没有历史")
+    """#9（🔴/🟡）重写前置条件：远端有没有历史，以及**这次推送要不要 force-push**。
+
+    `origin/HEAD` 在只说明「远端有历史」——那是不会消失的事实，任何 fetch 过的正常仓库都成立，
+    拿它判红等于让门禁永红。真正决定要不要 force-push 的是**本地 HEAD 还是不是 `origin/HEAD` 的后代**
+    （`git merge-base --is-ancestor` 的退出码：0 = 是 ⇒ 快进、不需要 force-push，🟡；
+    1 = 不是 ⇒ 历史已分叉、推上去必须 force-push，🔴）。
+    """
+    report.section("判据 #9 重写前置条件：远端有没有历史 / 这次推送要不要 force-push")
     rc, out = git_capture(root, "remote", "-v")
     if rc == 127:
         report.warn("<git remote>", 0, "git 不可用，判断不了有没有 push 过")
@@ -858,18 +866,34 @@ def check_rewrite_precondition(root: str, report: Report) -> None:
         report.ok("<git remote>", 0, "本地没有 remote：但别默认远端没有历史，重写前先核对目标仓是否已存在")
         return
     rc_head, _ = git_capture(root, "rev-parse", "--verify", "origin/HEAD")
-    if rc_head == 0:
+    if rc_head != 0:
+        report.warn(
+            "<git remote>",
+            0,
+            "有 remote 但取不到 origin/HEAD：证不了远端有没有历史，重写前用 `git ls-remote` 确认",
+            out.strip(),
+        )
+        return
+    rc_anc, _ = git_capture(root, "merge-base", "--is-ancestor", "origin/HEAD", "HEAD")
+    if rc_anc == 0:
+        report.warn(
+            "<git remote>",
+            0,
+            "远端已有历史（origin/HEAD 在），但本地 HEAD 是它的后代：本次是快进推送，不需要 force-push",
+            out.strip(),
+        )
+    elif rc_anc == 1:
         report.fail(
             "<git remote>",
             0,
-            "远端已有历史（origin/HEAD 在）：再重写要 force-push，先确认没人克隆过",
+            "本地历史已与远端分叉（origin/HEAD 不再是 HEAD 的祖先）：推上去要 force-push，先确认没人克隆过",
             out.strip(),
         )
     else:
         report.warn(
             "<git remote>",
             0,
-            "有 remote 但取不到 origin/HEAD：证不了远端有没有历史，重写前用 `git ls-remote` 确认",
+            f"origin/HEAD 与 HEAD 的祖先关系判不了（git merge-base 退出码 {rc_anc}），重写前人工核一遍",
             out.strip(),
         )
 

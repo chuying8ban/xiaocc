@@ -430,18 +430,38 @@ def test_remote_without_origin_head_is_warn(
     assert "git ls-remote" in out   # 让作者去远端核对有没有历史，别再默认「本地没 remote 就等于远端是空的」
 
 
-def test_remote_with_origin_head_is_red(
+def test_remote_with_origin_head_fast_forward_is_warn(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """推送过 + 有 origin/HEAD ⇒ 远端已有历史，再重写要 force-push，所有 clone 全废。"""
+    """推过 + 有 origin/HEAD，但本地 HEAD 还是它的后代 ⇒ 🟡：远端有历史是事实，快进推送不需要 force-push。
+
+    这条同时是假红守卫：只按「origin/HEAD 在」判红，任何 fetch 过的正常仓库都会永红。
+    """
     bare = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
     root = make_repo(tmp_path, dict(BASE_FILES), remote=str(bare))
     git(root, "push", "-q", "origin", "HEAD:refs/heads/main")
     git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
     rc, out = run_check(root, capsys)
+    assert rc == 0, out
+    assert "WARN <git remote>:0" in out
+    assert "本次是快进推送，不需要 force-push" in out
+    assert "FAIL <git remote>" not in out
+
+
+def test_remote_with_origin_head_diverged_is_red(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """推过之后改写已推送的提交（amend）⇒ origin/HEAD 不再是 HEAD 的祖先 ⇒ 🔴 推上去要 force-push。"""
+    bare = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(bare)], check=True)
+    root = make_repo(tmp_path, dict(BASE_FILES), remote=str(bare))
+    git(root, "push", "-q", "origin", "HEAD:refs/heads/main")
+    git(root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+    git(root, "commit", "-q", "--amend", "-m", "改写已推送的提交")
+    rc, out = run_check(root, capsys)
     assert rc == 1
-    assert "FAIL <git remote>:0  远端已有历史（origin/HEAD 在）" in out
+    assert "FAIL <git remote>:0  本地历史已与远端分叉" in out
     assert "force-push" in out
 
 
